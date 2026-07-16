@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: MIT
+
+import json
+import time
+import os
+from dataclasses import dataclass, asdict, is_dataclass
+from typing import List
+
+from PySide6.QtCore import QStandardPaths
+
+
+@dataclass
+class HistoryEntry:
+    file_path: str
+    file_name: str
+    file_size: int
+    file_type: str
+    timestamp: float
+    output_preview: str  # first 200 chars
+
+
+class HistoryManager:
+    """历史记录管理，JSON 文件持久化。"""
+
+    def __init__(self, max_entries: int = 50) -> None:
+        self._max = max_entries
+        data_dir = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        os.makedirs(data_dir, exist_ok=True)
+        self._path = os.path.join(data_dir, "history.json")
+        self._entries: List[HistoryEntry] = []
+        self._load()
+
+    @property
+    def entries(self) -> List[HistoryEntry]:
+        return list(self._entries)
+
+    def add(self, entry: HistoryEntry) -> None:
+        # deduplicate by file_path
+        self._entries = [e for e in self._entries if e.file_path != entry.file_path]
+        self._entries.insert(0, entry)
+        if len(self._entries) > self._max:
+            self._entries = self._entries[: self._max]
+        self._save()
+
+    def remove(self, file_path: str) -> None:
+        self._entries = [e for e in self._entries if e.file_path != file_path]
+        self._save()
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._save()
+
+    def _load(self) -> None:
+        if not os.path.isfile(self._path):
+            return
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._entries = [HistoryEntry(**item) for item in data[: self._max]]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            self._entries = []
+
+    def _save(self) -> None:
+        data = [asdict(e) for e in self._entries]
+        try:
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+    @staticmethod
+    def make_entry(
+        file_path: str, output_text: str, preview_len: int = 200
+    ) -> HistoryEntry:
+        name = os.path.basename(file_path)
+        _, ext = os.path.splitext(name)
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            size = 0
+        preview = output_text.strip()[:preview_len].replace("\n", " ")
+        return HistoryEntry(
+            file_path=file_path,
+            file_name=name,
+            file_size=size,
+            file_type=ext.lower(),
+            timestamp=time.time(),
+            output_preview=preview,
+        )
