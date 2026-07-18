@@ -80,7 +80,7 @@ QComboBox QAbstractItemView { background-color: #FFFFFF; color: #444444; selecti
 /* ── Radio / Check ─────────────────── */
 QRadioButton, QCheckBox { color: #444444; spacing: 6px; }
 QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #E8E8E8; }
-QCheckBox::indicator:checked { background-color: #6366F1; border-color: #6366F1; }
+QCheckBox::indicator:checked { background-color: #6366F1; border-color: #6366F1; image: url(assets/check.png); }
 QRadioButton::indicator { width: 18px; height: 18px; border-radius: 10px; border: 2px solid #E8E8E8; }
 
 /* ── ToolTip ───────────────────────── */

@@ -189,7 +189,7 @@ class UploadPanel(QWidget):
             'QLabel#UploadDropZone { border: 2px dashed #C9CDD4; border-radius: 16px; background: #FAFBFC; color: #86909C; font-size: 13px; }'
             'QLabel#UploadDropZone:hover { border-color: #6366F1; background: #F0F7FF; }'
         )
-        self._drop_zone.setText(chr(0x1F4C2) + chr(10) + chr(10) + chr(25351) + chr(25512) + chr(25991) + chr(20214) + chr(21040) + chr(27492) + chr(22788) + chr(19978) + chr(20256))
+        self._drop_zone.setText(chr(0x1F4C4) + chr(32) + chr(25302) + chr(25341) + chr(25991) + chr(20214) + chr(21040) + chr(27492) + chr(22788) + chr(19978) + chr(20256))
         layout.addWidget(self._drop_zone)
 
         # --- File type icons row ---
@@ -207,11 +207,6 @@ class UploadPanel(QWidget):
         ft_row.addStretch()
         layout.addLayout(ft_row)
 
-        # --- Select file button ---
-        self._select_btn = QPushButton(chr(0x1F4C2) + chr(32) + chr(36873) + chr(25321) + chr(25991) + chr(20214))
-        self._select_btn.setObjectName("secondaryBtn")
-        self._select_btn.setStyleSheet("QPushButton#secondaryBtn { background: #F2F3F5; color: #4E5969; border: 1px solid #E8E8E8; border-radius: 12px; padding: 8px 16px; }")
-        layout.addWidget(self._select_btn)
 
         # --- Queue list ---
         self._queue_list = QListWidget()
@@ -220,23 +215,13 @@ class UploadPanel(QWidget):
         self._queue_list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._queue_list)
 
-        # --- Action buttons ---
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        self._convert_btn = QPushButton(chr(0x1F680) + chr(32) + chr(19968) + chr(38190) + chr(36716) + chr(25442))
-        self._convert_btn.setObjectName("primaryAction")
-        self._convert_btn.setStyleSheet("QPushButton#primaryAction { background: #6366F1; color: white; font-size: 14px; font-weight: 600; padding: 10px 24px; }")
-        self._new_btn = QPushButton(chr(0x2795) + chr(32) + chr(26032) + chr(24314) + chr(36716) + chr(25442))
-        self._new_btn.setObjectName("secondaryBtn")
-        btn_row.addWidget(self._convert_btn)
-        btn_row.addWidget(self._new_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
+
 
         # Drop zone events
         self._drop_zone.dragEnterEvent = self._on_drag_enter
         self._drop_zone.dragLeaveEvent = self._on_drag_leave
         self._drop_zone.dropEvent = self._on_drop
+        self._drop_zone.mouseReleaseEvent = self._on_drop_zone_click
 
     # --- Queue management ---
 
@@ -290,6 +275,16 @@ class UploadPanel(QWidget):
         path = item.data(Qt.UserRole)
         if path:
             self.file_selected.emit(path)
+
+    # --- Click to select ---
+
+    def _on_drop_zone_click(self, event):
+        paths, _ = QFileDialog.getOpenFileNames(self, "\u9009\u62e9\u6587\u4ef6", "",
+            "\u6240\u6709\u652f\u6301\u7684\u6587\u4ef6 (*.pdf *.docx *.pptx *.xlsx *.html *.txt *.csv *.md *.jpg *.png *.wav *.mp3);;\u6240\u6709\u6587\u4ef6 (*)")
+        for p in paths:
+            self.add_file(p)
+        if paths:
+            self.files_added.emit(paths)
 
     # --- Drop events ---
 

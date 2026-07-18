@@ -237,16 +237,15 @@ class MainWindow(QMainWindow):
         sl.addStretch()
         self._pages.addWidget(settings_page)
 
-        root.addWidget(self._pages, 1)
-        
-        # Status Bar
         self._navbar = TopNavBar()
         self._navbar.nav_changed.connect(self._on_nav_changed)
-        root.addWidget(self._navbar)
 
         self._status = QLabel("就绪")
-        self.statusBar().addWidget(self._status, 1)
-
+        root.addWidget(self._navbar)
+        root.addWidget(self._pages, 1)
+        root.addWidget(self._status)
+        
+        # Status Bar
         # Signals
         self._connect_signals()
 
@@ -268,12 +267,16 @@ class MainWindow(QMainWindow):
         self._navbar._clear_btn.clicked.connect(self._clear_content)
         self._navbar._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._navbar._export_btn.clicked.connect(self._save_file)
+        self._convert_btn.clicked.connect(self._start_convert)
+        self._upload_panel.file_selected.connect(self._on_file_selected)
+        self._upload_panel.file_selected.connect(self._on_file_selected)
 
         self._upload_panel.files_added.connect(self._on_files_dropped)
         self._upload_panel.convert_requested.connect(self._start_convert)
-        self._upload_panel._select_btn.clicked.connect(self._open_file)
         self._upload_panel.file_selected.connect(self._on_file_selected)
         self._convert_btn.clicked.connect(self._start_convert)
+        self._upload_panel.file_selected.connect(self._on_file_selected)
+        self._upload_panel.file_selected.connect(self._on_file_selected)
         self._view_mode_btn.clicked.connect(self._toggle_preview_mode)
         self._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._save_btn.clicked.connect(self._save_file)
@@ -327,13 +330,17 @@ class MainWindow(QMainWindow):
             self._convert_file(path)
             return
         self._queue_running = False
-        self._status.setText(f"\u2705 \u5168\u90e8\u5b8c\u6210 ({len(self._file_list)} \u4e2a\u6587\u4ef6)")
-
     def _start_convert(self):
         if not self._file_list:
-            QMessageBox.information(self, "提示", "请先添加文件。")
+            QMessageBox.information(self, "提示", "请先添加文件")
             return
-        self._convert_file(self._file_list[0])
+        if getattr(self, "_queue_running", False):
+            return
+        self._queue_running = True
+        self._queue_index = 0
+        self._file_manually_selected = False
+        self._status.setText(f"\u5f00\u59cb\u6279\u91cf\u8f6c\u6362 ({len(self._file_list)} \u4e2a\u6587\u4ef6)...")
+        self._process_next_in_queue()
 
     def convert_file(self, file_path):
         self._convert_file(file_path)
@@ -377,8 +384,6 @@ class MainWindow(QMainWindow):
             self._upload_panel.set_item_status(self._queue_index, "success")
             self._queue_index += 1
             self._process_next_in_queue()
-        self.history_mgr.add(entry)
-        self._refresh_history()
 
     @Slot(str, str)
     def _on_convert_error(self, error_msg, file_path):

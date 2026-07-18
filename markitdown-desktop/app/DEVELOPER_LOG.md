@@ -370,3 +370,23 @@ action buttons (导入/批量导入/清空/复制MD/导出), theme toggle
 **Card radius:** 12px, **Button radius:** 6-8px
 **Colors:** success #10B981, error #EF4444, warning #F59E0B
 **Removed:** Inline TopBar, Sidebar widget from main_window.py
+
+## v0.11.2 — Batch Conversion Fix + Checkbox Indicator (2026-07-18)
+
+**Batch conversion (bug fix):**
+- _start_convert was still the old single-file version (c.replace failed due to CRLF vs LF)
+- Replaced _start_convert with queue-processing version (_process_next_in_queue)
+- Added _convert_btn.clicked → _start_convert (was lost during _connect_signals rewrite)
+- Added _upload_panel.file_selected → _on_file_selected (queue item click → preview)
+
+**Checkbox indicator:**
+- check.png was deleted during asset cleanup; recreated as 18x18 white checkmark
+- light.qss and dark.qss: added image: url(assets/check.png) to QCheckBox::indicator:checked
+- theme.py URL resolution (url(assets/…) → absolute path) already in place
+
+**UploadPanel cleanup:**
+- Removed \"一键转换\" and \"新建转换\" buttons (user request)
+- Drop zone is now clickable (mouseReleaseEvent → QFileDialog → add_file)
+
+**Root cause debugged:** CRLF line endings (\r\n) in .py files caused all c.replace() with
+\n to silently fail. Fixed by normalizing to LF before replacements.
