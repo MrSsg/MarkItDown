@@ -2,8 +2,10 @@
 
 import sys
 import os
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="pydub")
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,6 +47,7 @@ def main() -> None:
 
     float_win = FloatWindow(settings, theme_mgr)
     float_win.setWindowIcon(icon)
+    main_win.set_float_window(float_win)
 
     # ── 信号连接 ──
     float_win.file_dropped.connect(lambda p: main_win._on_files_dropped([p]))
@@ -97,7 +100,8 @@ def main() -> None:
 
     # ── 显示窗口 ──
     main_win.show()
-    float_win.show()
+    if settings.show_float_window:
+        float_win.show()
 
     sys.exit(app.exec())
 

@@ -5,7 +5,7 @@ import os, sys, shutil, subprocess, json, tempfile
 from pathlib import Path
 from typing import Optional, Tuple, Callable
 from zipfile import ZipFile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 KERNEL_REPO = "microsoft/markitdown"
 GITHUB_API = "https://api.github.com/repos/microsoft/markitdown/releases/latest"
@@ -25,9 +25,15 @@ class ReleaseInfo:
             self.version = self.tag_name.lstrip("v")
 
 
+_KERNEL_VERSION_CACHE: str = ""
+
 def get_local_kernel_version() -> str:
+    global _KERNEL_VERSION_CACHE
+    if _KERNEL_VERSION_CACHE:
+        return _KERNEL_VERSION_CACHE
     try:
         from markitdown.__about__ import __version__
+        _KERNEL_VERSION_CACHE = __version__
         return __version__
     except Exception:
         return "0.0.0"

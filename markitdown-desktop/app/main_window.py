@@ -18,7 +18,7 @@ from .worker import ConvertWorker
 from .history import HistoryManager, HistoryEntry
 from .settings import AppSettings
 from .theme import ThemeManager
-from .widgets import (UploadPanel, TopNavBar, CollapsibleCard, DropArea, HistoryPanel)
+from .widgets import (UploadPanel, TopNavBar, CollapsibleCard, HistoryPanel)
 from .dialogs import SettingsDialog
 from app.__about__ import __version__, __app_name__
 
@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self._current_file = None
         self._current_markdown = ""
         self._convert_start = 0.0
+        self._float_win = None
         self._file_list = []
         self._conversion_results = {}
 
@@ -83,7 +84,7 @@ class MainWindow(QMainWindow):
         cl.setSpacing(12)
 
         # Three equal-width cards in a horizontal splitter
-        self._inner_splitter = ResettableSplitter(Qt.Horizontal, default_sizes=[333, 333, 334])
+        self._inner_splitter = ResettableSplitter(Qt.Horizontal, default_sizes=[286, 143, 571])
 
         # Card 1: Upload
         self._upload_card = CollapsibleCard("上传文件")
@@ -95,13 +96,6 @@ class MainWindow(QMainWindow):
         # Card 2: Options
         self._options_card = CollapsibleCard("转换选项")
         ol = self._options_card.content_layout()
-        hl = QHBoxLayout()
-        hl.addWidget(QLabel("标题层级:"))
-        self._heading_cb = QComboBox()
-        self._heading_cb.addItems(["h1", "h2", "h3", "h4", "h5", "h6"])
-        self._heading_cb.setCurrentIndex(1)
-        hl.addWidget(self._heading_cb); hl.addStretch()
-        ol.addLayout(hl)
         self._render_cb = QCheckBox("渲染 Markdown 预览")
         self._render_cb.setChecked(True); ol.addWidget(self._render_cb)
         self._image_cb = QCheckBox("嵌入图片")
@@ -144,7 +138,7 @@ class MainWindow(QMainWindow):
         self._inner_splitter.addWidget(self._preview_card)
 
         # Wrap inner splitter + history into outer vertical splitter
-        self._outer_splitter = ResettableSplitter(Qt.Vertical, default_sizes=[600, 400])
+        self._outer_splitter = ResettableSplitter(Qt.Vertical, default_sizes=[780, 220])
         top_container = QWidget()
         top_layout = QVBoxLayout(top_container)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -212,6 +206,9 @@ class MainWindow(QMainWindow):
         self._sys_rb = QRadioButton("\u8ddf\u968f\u7cfb\u7edf")
         self._dark_rb = QRadioButton("\u6697\u8272\u6a21\u5f0f")
         self._light_rb = QRadioButton("\u4eae\u8272\u6a21\u5f0f")
+        self._sys_rb.toggled.connect(self._on_settings_theme_toggled)
+        self._dark_rb.toggled.connect(self._on_settings_theme_toggled)
+        self._light_rb.toggled.connect(self._on_settings_theme_toggled)
         g2l.addWidget(self._sys_rb); g2l.addWidget(self._dark_rb); g2l.addWidget(self._light_rb)
         sl.addWidget(g2)
 
@@ -275,18 +272,32 @@ class MainWindow(QMainWindow):
         self._upload_panel.convert_requested.connect(self._start_convert)
         self._upload_panel.file_selected.connect(self._on_file_selected)
         self._convert_btn.clicked.connect(self._start_convert)
-        self._upload_panel.file_selected.connect(self._on_file_selected)
-        self._upload_panel.file_selected.connect(self._on_file_selected)
         self._view_mode_btn.clicked.connect(self._toggle_preview_mode)
         self._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._save_btn.clicked.connect(self._save_file)
         self._export_all_btn.clicked.connect(lambda: self._save_file(batch=True))
         self._hist_panel.clear_btn.clicked.connect(self._clear_history)
         self._hist_panel.list_widget.itemClicked.connect(self._on_history_clicked)
+        self._navbar._theme_btn.clicked.connect(self._theme.toggle)
         self._theme.theme_changed.connect(self._on_theme_changed)
 
-    def _on_theme_changed(self, theme):
+    def _on_settings_theme_toggled(self, checked):
+        """Apply theme immediately when a radio button is clicked."""
+        if not checked:
+            return
+        if self._sys_rb.isChecked():
+            self._settings.theme_mode = "system"
+            self._theme.set_mode("system")
+        elif self._dark_rb.isChecked():
+            self._settings.theme_mode = "dark"
+            self._theme.set_mode("dark")
+        else:
+            self._settings.theme_mode = "light"
+            self._theme.set_mode("light")
+        self._settings.sync()
 
+    def _on_theme_changed(self, theme):
+        self._navbar.update_theme_icon(theme == "dark")
         if self._current_markdown:
             self._render_markdown(self._current_markdown)
 
@@ -342,13 +353,13 @@ class MainWindow(QMainWindow):
         self._status.setText(f"\u5f00\u59cb\u6279\u91cf\u8f6c\u6362 ({len(self._file_list)} \u4e2a\u6587\u4ef6)...")
         self._process_next_in_queue()
 
-    def convert_file(self, file_path):
-        self._convert_file(file_path)
-
     def _convert_file(self, file_path):
         self._current_file = file_path
         self._convert_start = time.time()
-        self._worker.start_convert(file_path)
+        ocr_on = self._ocr_cb.isChecked()
+        if ocr_on:
+            self._status.setText(f"正在转换 (OCR已开启): {os.path.basename(file_path)}...")
+        self._worker.start_convert(file_path, enable_ocr=ocr_on)
 
     def _on_file_selected(self, file_path):
         if file_path in self._conversion_results:
@@ -549,7 +560,7 @@ class MainWindow(QMainWindow):
         self._status.setText("\u8bbe\u7f6e\u5df2\u4fdd\u5b58")
 
     def _open_settings(self):
-        dlg = SettingsDialog(self._settings, self._theme, self)
+        dlg = SettingsDialog(self._settings, self._theme, self._float_win, self)
         dlg.exec()
         self.history_mgr._max = self._settings.max_history
 
@@ -587,15 +598,42 @@ class MainWindow(QMainWindow):
 
 
     def _on_nav_changed(self, nav_id):
-        """Handle sidebar navigation."""
+        """Handle top navigation."""
         self._navbar.set_active(nav_id)
         if nav_id == "settings":
             self._open_settings()
+        elif nav_id == "file":
+            self._open_file()
+        elif nav_id == "history":
+            self._toggle_history_size()
+
+    def _toggle_history_size(self):
+        """Toggle outer splitter between 50/50 and default 60/40."""
+        sizes = self._outer_splitter.sizes()
+        total = sum(sizes)
+        if total < 100:
+            return
+        ratio = sizes[0] / total if total > 0 else 0.6
+        if 0.45 <= ratio <= 0.55:
+            default = getattr(self._outer_splitter, "_default_sizes", None) or [780, 220]
+            self._outer_splitter.setSizes(default)
+            self._status.setText("已收起历史面板")
+        else:
+            half = total // 2
+            self._outer_splitter.setSizes([half, total - half])
+            self._status.setText("历史面板已展开")
+
+    def set_float_window(self, win):
+        self._float_win = win
 
     def closeEvent(self, event):
         self._settings.window_geometry = self.saveGeometry()
         self._settings.window_splitter_outer = self._outer_splitter.saveState()
         self._settings.window_splitter_inner = self._inner_splitter.saveState()
         self._settings.sync()
-        super().closeEvent(event)
-
+        if self._settings.close_to_tray:
+            event.ignore()
+            self.hide()
+        else:
+            from PySide6.QtWidgets import QApplication
+            QApplication.quit()

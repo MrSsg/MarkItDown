@@ -390,3 +390,210 @@ action buttons (导入/批量导入/清空/复制MD/导出), theme toggle
 
 **Root cause debugged:** CRLF line endings (\r\n) in .py files caused all c.replace() with
 \n to silently fail. Fixed by normalizing to LF before replacements.
+
+
+## v0.11.5 — Dark Theme Fix + Settings Theme Options (2026-07-18)
+
+**Core bug fixed:** `_on_settings_theme_toggled` method was missing from `main_window.py`.
+Theme radio buttons in settings page connected to it on init but the method was never defined,
+causing AttributeError on app startup.
+
+**Fix:**
+- Added `_on_settings_theme_toggled` to MainWindow class — immediately applies theme when
+  any radio button is clicked, syncs settings to disk
+- Added `_on_theme_toggled` to SettingsDialog — same immediate-apply behavior when user
+  clicks theme radio buttons in the dialog (was previously only applied on OK press)
+- Fixed indentation issues in main_window.py (3-space vs 4-space methods)
+
+**QSS overhaul:**
+- Completely rewrote `dark.qss` with comprehensive selectors for all current UI widgets:
+  TopNavBar buttons, CardWidget, HistoryPanel, UploadDropZone, SettingsDialog, etc.
+- Updated `light.qss` to match, adding missing selectors for CardWidget, HistoryPanel,
+  nav buttons, tool buttons, icon buttons
+- Both themes now properly style QComboBox, QSpinBox, QGroupBox, QRadioButton, QCheckBox
+- Consistent color palette: #303643 borders for dark, #E5E6EB for light
+- Checkbox and radio button indicators have hover state styling
+
+
+## v0.11.6 — Icon Files Restoration (2026-07-18)
+
+**Warning:** `QSystemTrayIcon::setVisible: No Icon set` — system tray had no icon.
+
+**Root cause:** During UI refactors in v0.11.0, the icon_*.png files were never copied
+from user's source directory (`markconvert_icon/` and `markconvert_float_icon/`) to the
+`assets/` folder. The code at `main.py:33-35` looked for them but they didn't exist.
+
+**Fix:** Copied all 6 icon files to `assets/`:
+- icon_16/32/128.png — app/tray window icon
+- markconvert_float_16/32/128.png — float window custom-drawn icon
+
+
+## v0.11.8 — Float Window Icon Background Fix (2026-07-18)
+
+**Bug:** Collapsed float window showed a dark gray rounded rectangle with border
+behind the icon PNG, making the icon look like it had a black frame with sharp corners.
+
+**Root cause:** `paintEvent` unconditionally filled the entire window with 
+`#2d2d2d` and drew a 1px border, even in COLLAPSED state. The icon PNG
+already contains its own blue-purple gradient background.
+
+**Fix:** Modified `paintEvent` to skip the background fill and border drawing
+when `self._state == State.COLLAPSED`. Only the icon PNG is drawn directly
+on the transparent window (WA_TranslucentBackground handles the rest).
+
+
+## v0.11.9 — Remove Heading Level + Fix Label Backgrounds (2026-07-18)
+
+**1. Removed "标题层级" dropdown:**
+- This UI control was never wired up to the conversion pipeline
+- Deleted heading_cb QComboBox + "标题层级:" label + associated QHBoxLayout from options card
+
+**2. Removed label background bleed:**
+- Generic QSS rule `QMainWindow, QWidget { background-color: ... }` applied the page
+  background color to ALL QWidget instances, including QLabels inside cards/panels
+- This created a visible color mismatch (label bg ≠ parent card bg)
+- **Fix:** Changed `QMainWindow, QWidget` to just `QMainWindow` so child widgets
+  don't inherit the page background; added explicit `QLabel { background: transparent; }`
+- Also replaced `color: palette(mid)` with explicit `#86909C` to avoid palette resolution issues
+
+
+## v0.11.10 — Pre-warm Kernel Version Cache + Silence ffmpeg Warning (2026-07-18)
+
+**Problem:** Every fresh app start → first time opening settings → `get_local_kernel_version()`
+imported markitdown (cache miss) → pydub loaded → ffmpeg check → terminal warning + UI lag.
+
+**Fix 1 — Pre-warm cache:** Added `get_local_kernel_version()` call in `main.py` right after
+core module initialization. Import happens during app startup (user already waits for this),
+kernel version is cached before user can click settings.
+
+**Fix 2 — Silence ffmpeg warning:** Added `warnings.filterwarnings("ignore", ...)` in `main.py`
+for `RuntimeWarning` from `pydub.utils` module. Warning was harmless but visually noisy.
+
+
+## v0.11.11 — Nav Buttons: "文件" Opens File, "历史" Toggles History Size (2026-07-18)
+
+**Problem:** TopNavBar "文件" and "历史" buttons had no functionality — only highlighted.
+
+**Changes to `_on_nav_changed`:**
+- "文件" → calls `_open_file()` (opens multi-format file dialog)
+- "历史" → calls `_toggle_history_size()`
+
+**New method `_toggle_history_size`:**
+- First click: outer splitter → 50/50 (history panel expands to ~50% height)
+- Second click: restores default 60/40 ratio
+- Uses ratio detection (45%-55% window) to determine toggle direction
+- Status bar updates: "历史面板已展开" / "已收起历史面板"
+
+
+## v0.11.12 — History Panel: Default Height 22% + List Expands With Panel (2026-07-18)
+
+**Default height too tall:** Splitter ratio was 600:400 (40% for history). Changed
+to [780, 220] — history panel now occupies ~22% of window.
+
+**List didn't grow with panel:** HistoryPanel's QListWidget had `setMaximumHeight(160)`.
+When expanding the panel, only the empty padding below the list grew — actual file
+list was capped at 160px.
+
+**Fix:** Removed `setMaximumHeight(160)`, changed `layout.addWidget(self._list)` to
+`layout.addWidget(self._list, 1)` (stretch factor). List now fills all available
+space and expands/contracts with the splitter.
+
+
+## v1.0.0 — 正式版 (2026-07-18)
+
+**Float window icon aliasing fix:**
+- Added `SmoothPixmapTransform` render hint to float window paintEvent.
+  Previously only `Antialiasing` was enabled (smooths vector lines), but
+  pixmap scaling needs `SmoothPixmapTransform` for proper downscale quality.
+- Expanded source image loader to support 256px and 512px in addition to
+  16/32/128. If a higher-res PNG is placed in assets/, it will be used
+  as the preferred source for scaling down to the display size (~28px).
+
+**Inner splitter ratio:** Changed from 1:1:1 (333, 333, 334) to 2:1:4
+(286, 143, 571) — upload/options/preview. Preview now gets ~57% of space.
+
+
+## v1.0.1 — Settings: Float Window Toggle + Close Behavior (2026-07-18)
+
+**Two new settings options:**
+
+**1. 悬浮窗开关 (Toggle Float Window)**
+- Checkbox in SettingsDialog: "开启悬浮窗"
+- Immediate effect: uncheck hides the float window, check shows it
+- Persisted via `settings.show_float_window` (QSettings, default True)
+- On startup, float_win.show() is gated behind this setting
+- Passed to SettingsDialog via `float_win` parameter for direct show/hide
+
+**2. 关闭主窗口时 (Close Behavior)**
+- Two radio buttons: "最小化到系统托盘" / "完全退出应用"
+- Default: minimize to tray (preserves existing behavior)
+- Persisted via `settings.close_to_tray` (QSettings, default True)
+- closeEvent checks the setting: hide() or QApplication.quit()
+
+**File changes:**
+- settings.py: added show_float_window + close_to_tray properties
+- dialogs.py: added float_win param, float window groupbox, close behavior groupbox
+- main_window.py: added _float_win attr + set_float_window(), updated closeEvent
+- main.py: wired float_win to main_window, gated float_win.show()
+
+
+## v1.0.2 — Theme Button + OCR Integration Prep (2026-07-18)
+
+**1. TopNavBar theme button now functional:**
+- Changed button from dead symbol to working theme toggle
+- Size: 28x28 → 38x38, uses QSS iconBtn styling (18px font, proper hover)
+- Icons: ☀ (light theme) / ☾ (dark theme), updates automatically on theme change
+- Connected to ThemeManager.toggle() via _theme_btn.clicked signal
+- Icon updates in _on_theme_changed (covers all paths: button click, settings, tray menu)
+
+**2. OCR checkox wired to conversion pipeline:**
+- worker.py: start_convert() accepts enable_ocr param, passed to MarkItDown(enable_plugins=...)
+- main_window.py: _convert_file() reads _ocr_cb state and passes to worker
+- Status bar shows "(OCR已开启)" when enabled
+
+**3. Azure Document Intelligence tutorial:**
+- Created docs/azure-ocr-setup.md with step-by-step setup guide
+- Covers: resource creation, key acquisition, dependency installation, environment config
+
+
+## v1.1.0 — Code Optimization & Cleanup (2026-07-18)
+
+**Removed dead code (~250 lines total):**
+- widgets.py: Removed TopBar, DropArea, Sidebar classes (all replaced by newer 
+  equivalents — TopNavBar, UploadPanel, and in-page navigation)
+- float_window.py: Removed _draw_hover_text() and _draw_active() methods 
+  (defined but never called since the hover/active states rely on other 
+  drawing paths)
+
+**Deduplicated signal connections:**
+- _connect_signals had 5 file_selected and 2 convert_btn.clicked connections 
+  pointing to the same handler — reduced to 2 total. Prevents redundant 
+  event processing.
+
+**Removed dead methods:**
+- convert_file() in main_window.py (public wrapper for _convert_file, never 
+  called from outside the class)
+
+**Cleaned up unused imports:**
+- history.py: removed is_dataclass
+- updater.py: removed unused field
+- dialogs.py: removed unused AppSettings, ThemeManager imports
+
+**Other:**
+- Removed __pycache__ (172KB of stale bytecode)
+- widgets.py reduced from 563 to 366 lines (-35%%)
+
+
+## v1.1.1 — Startup Speed Optimization (2026-07-18)
+
+**Problem:** Markitdown pre-warming (importing markitdown + pydub) was done
+synchronously during startup, blocking the UI from appearing for ~1.1s.
+
+**Before:** Total startup = 152ms (other) + 1117ms (markitdown) = 1270ms.
+
+**Fix:** Moved `get_local_kernel_version()` from synchronous startup to
+`QTimer.singleShot(0, ...)` after window show. UI now appears in ~500ms,
+markitdown loads in the background.
+
+**After:** UI ready in ~505ms. Deferred markitdown import (~1s) runs
+asynchronously — cache is populated before user can open settings.

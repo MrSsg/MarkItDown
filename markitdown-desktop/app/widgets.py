@@ -13,111 +13,6 @@ TOPBAR_HEIGHT = 64
 CARD_RADIUS = 16
 
 
-class TopBar(QFrame):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("TopBar")
-        self.setFixedHeight(TOPBAR_HEIGHT)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(0)
-        left = QHBoxLayout()
-        left.setSpacing(6)
-        logo = QLabel("MD")
-        logo.setFixedSize(34, 34)
-        logo.setAlignment(Qt.AlignCenter)
-        f = logo.font(); f.setBold(True); f.setPointSize(12)
-        logo.setFont(f)
-        logo.setStyleSheet("background: #6366F1; color: white; border-radius: 9px;")
-        left.addWidget(logo)
-        name_lbl = QLabel("MarkConvert Desk")
-        name_lbl.setStyleSheet("font-size: 18px; font-weight: 600; padding: 0 4px;")
-        left.addWidget(name_lbl)
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFixedWidth(1)
-        sep.setStyleSheet("background: palette(mid);")
-        left.addWidget(sep)
-        for nav_id, txt in [("file", "  文件"), ("history", "  历史"), ("settings", "  设置")]:
-            b = QPushButton(txt)
-            b.setObjectName("navBtn")
-            left.addWidget(b)
-        left.addStretch()
-        layout.addLayout(left, 1)
-        center = QHBoxLayout()
-        center.setSpacing(6)
-        self._tool_btns = {}
-        tool_defs = [
-            ("toolOpen", chr(0x1F4C2) + " 打开"),
-            ("toolConvert", chr(0x1F504) + " 转换"),
-            ("toolCopy", chr(0x1F4CB) + " 复制"),
-            ("toolMD", "MD"),
-            ("toolClear", chr(0x1F5D1) + " 清空"),
-        ]
-        for obj_id, txt in tool_defs:
-            b = QPushButton(txt)
-            b.setObjectName("toolBtn")
-            b.setFixedHeight(36)
-            center.addWidget(b)
-            self._tool_btns[obj_id] = b
-        # Set PNG icons for tool buttons
-        import os
-        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
-        icon_names = {"toolOpen": "open_file.png", "toolConvert": "Convert.png", "toolCopy": "copy.png", "toolClear": "delete.png"}
-        for obj_id, fname in icon_names.items():
-            if obj_id in self._tool_btns:
-                fp = os.path.join(assets_dir, fname)
-                if os.path.isfile(fp):
-                    pixmap = QPixmap(fp)
-                    if not pixmap.isNull():
-                        self._tool_btns[obj_id].setIcon(QIcon(pixmap))
-                        self._tool_btns[obj_id].setIconSize(QSize(20, 20))
-                        self._tool_btns[obj_id].setText("")
-        layout.addLayout(center)
-        right = QHBoxLayout()
-        right.setSpacing(4)
-        self._theme_btn = QPushButton(chr(0x2600))
-        fp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "theme.png")
-        if os.path.isfile(fp):
-            pix = QPixmap(fp)
-            if not pix.isNull():
-                self._theme_btn.setIcon(QIcon(pix))
-                self._theme_btn.setIconSize(QSize(20, 20))
-                self._theme_btn.setText("")
-        self._theme_btn.setIconSize(QSize(20, 20))
-        self._theme_btn.setText("")
-        self._theme_btn.setObjectName("iconBtn")
-        self._theme_btn.setFixedSize(38, 38)
-        self._theme_btn.setToolTip("切换主题")
-        right.addWidget(self._theme_btn)
-        self._settings_btn = QPushButton(chr(0x2699))
-        fp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "setting.png")
-        if os.path.isfile(fp):
-            pix = QPixmap(fp)
-            if not pix.isNull():
-                self._settings_btn.setIcon(QIcon(pix))
-                self._settings_btn.setIconSize(QSize(20, 20))
-                self._settings_btn.setText("")
-        self._settings_btn.setIconSize(QSize(20, 20))
-        self._settings_btn.setText("")
-        self._settings_btn.setObjectName("iconBtn")
-        self._settings_btn.setFixedSize(38, 38)
-        self._settings_btn.setToolTip("设置")
-        right.addWidget(self._settings_btn)
-        layout.addLayout(right)
-
-    def tool_button(self, name):
-        return self._tool_btns.get(name)
-    @property
-    def theme_btn(self):
-        return self._theme_btn
-    @property
-    def settings_btn(self):
-        return self._settings_btn
-    def update_theme_icon(self, is_dark):
-        self._theme_btn.setText(chr(0x2602) if is_dark else chr(0x2600))
-
-
 class CollapsibleCard(QFrame):
     def __init__(self, title="", parent=None, collapsed=False):
         super().__init__(parent)
@@ -150,7 +45,7 @@ class CollapsibleCard(QFrame):
         self._content.setObjectName("cardContent")
         self._clayout = QVBoxLayout(self._content)
         self._clayout.setContentsMargins(20, 4, 20, 20)
-        self._clayout.setSpacing(12)
+        self._clayout.setSpacing(8)
         layout.addWidget(self._content)
         if collapsed:
             self._content.setVisible(False)
@@ -177,13 +72,13 @@ class UploadPanel(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         # --- Drop zone ---
         self._drop_zone = QLabel()
         self._drop_zone.setObjectName("UploadDropZone")
         self._drop_zone.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._drop_zone.setMinimumHeight(120)
+        self._drop_zone.setMinimumHeight(90)
         self._drop_zone.setAcceptDrops(True)
         self._drop_zone.setStyleSheet(
             'QLabel#UploadDropZone { border: 2px dashed #C9CDD4; border-radius: 16px; background: #FAFBFC; color: #86909C; font-size: 13px; }'
@@ -192,26 +87,26 @@ class UploadPanel(QWidget):
         self._drop_zone.setText(chr(0x1F4C4) + chr(32) + chr(25302) + chr(25341) + chr(25991) + chr(20214) + chr(21040) + chr(27492) + chr(22788) + chr(19978) + chr(20256))
         layout.addWidget(self._drop_zone)
 
-        # --- File type icons row ---
-        ft_row = QHBoxLayout()
-        ft_row.setSpacing(8)
-        ft_row.addStretch()
-        for label, bg in [("PDF", "#F53F3F"), ("Word", "#2B6BEF"), ("PPT", "#FF7D00"),
-                           ("Excel", "#00B42A"), ("图片", "#F53F3F"), ("HTML", "#FF7D00"),
-                           ("EPUB", "#2B6BEF")]:
-            ft = QLabel(label)
-            ft.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            ft.setFixedSize(56, 32)
-            ft.setStyleSheet(f"background: {bg}; color: white; border-radius: 8px; font-size: 11px; font-weight: 600;")
-            ft_row.addWidget(ft)
-        ft_row.addStretch()
-        layout.addLayout(ft_row)
-
+        # 文件类型图标（两行）
+        def _mk_row(items):
+            r = QHBoxLayout()
+            r.setSpacing(8)
+            r.addStretch()
+            for lbl, bg in items:
+                ft = QLabel(lbl)
+                ft.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                ft.setFixedSize(56, 26)
+                ft.setStyleSheet(f"background: {bg}; color: white; border-radius: 6px; font-size: 10px; font-weight: 600;")
+                r.addWidget(ft)
+            r.addStretch()
+            return r
+        layout.addLayout(_mk_row([("PDF", "#F53F3F"), ("Word", "#2B6BEF"), ("PPT", "#FF7D00")]))
+        layout.addLayout(_mk_row([("Excel", "#00B42A"), ("HTML", "#FF7D00"), ("EPUB", "#2B6BEF")]))
 
         # --- Queue list ---
         self._queue_list = QListWidget()
         self._queue_list.setAlternatingRowColors(False)
-        self._queue_list.setMinimumHeight(80)
+        self._queue_list.setMinimumHeight(60)
         self._queue_list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._queue_list)
 
@@ -312,69 +207,6 @@ class UploadPanel(QWidget):
         if paths:
             self.files_added.emit(paths)
         event.acceptProposedAction()
-class DropArea(QWidget):
-    file_dropped = Signal(list)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("dropArea")
-        self.setAcceptDrops(True)
-        self.setMinimumHeight(160)
-        self._drag_over = False
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(8)
-        icon_lbl = QLabel(chr(0x1F4C1))
-        icon_lbl.setObjectName("dropIcon")
-        icon_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(icon_lbl)
-        text_lbl = QLabel("拖拽文件到这里，或点击浏览")
-        text_lbl.setObjectName("dropText")
-        text_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(text_lbl)
-        hint_lbl = QLabel("支持 PDF、DOCX、XLSX、PPTX、TXT、图片等多种格式")
-        hint_lbl.setObjectName("dropHint")
-        hint_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(hint_lbl)
-        self._browse_btn = QPushButton("浏览文件...")
-        self._browse_btn.setObjectName("secondaryBtn")
-        self._browse_btn.setFixedWidth(160)
-        layout.addWidget(self._browse_btn, 0, Qt.AlignCenter)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            self._drag_over = True
-            self.setProperty("dragOver", True)
-            self.style().unpolish(self)
-            self.style().polish(self)
-            event.acceptProposedAction()
-
-    def dragLeaveEvent(self, event):
-        self._drag_over = False
-        self.setProperty("dragOver", False)
-        self.style().unpolish(self)
-        self.style().polish(self)
-
-    def dropEvent(self, event):
-        self._drag_over = False
-        self.setProperty("dragOver", False)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
-        if paths:
-            self.file_dropped.emit(paths)
-        event.acceptProposedAction()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            mw = self.window()
-            if hasattr(mw, "_open_file"):
-                mw._open_file()
-
-    @property
-    def browse_btn(self):
-        return self._browse_btn
-
 class HistoryPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -388,7 +220,7 @@ class HistoryPanel(QFrame):
         hdr.addWidget(title_lbl)
         hdr.addStretch()
         self._count_lbl = QLabel("")
-        self._count_lbl.setStyleSheet("color: palette(mid); font-size: 12px;")
+        self._count_lbl.setStyleSheet("color: #86909C; font-size: 12px;")
         hdr.addWidget(self._count_lbl)
         self._clear_btn = QPushButton("清空")
         self._clear_btn.setObjectName("histActionBtn")
@@ -397,8 +229,7 @@ class HistoryPanel(QFrame):
         layout.addLayout(hdr)
         self._list = QListWidget()
         self._list.setMinimumHeight(80)
-        self._list.setMaximumHeight(160)
-        layout.addWidget(self._list)
+        layout.addWidget(self._list, 1)
 
     @property
     def list_widget(self):
@@ -412,69 +243,6 @@ class HistoryPanel(QFrame):
 
 
 # ---- Sidebar Navigation (v0.11.0) ----
-
-class Sidebar(QFrame):
-    nav_changed = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("Sidebar")
-        self.setFixedWidth(240)
-        self.setStyleSheet("QFrame#Sidebar { background: #F5F5F5; border-right: 1px solid #E8E8E8; }")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Logo
-        logo = QLabel("M")
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setFixedHeight(56)
-        logo.setStyleSheet(
-            "QLabel { background: #6366F1; color: white; font-size: 20px; font-weight: 700; "
-            "border-radius: 0; }"
-        )
-        layout.addWidget(logo)
-
-        # Nav items
-        self._nav_btns = []
-        items = [
-            ("batch",   "\U0001f4e6 \u6279\u91cf\u8f6c\u6362"),
-            ("history", "\U0001f4cb \u8f6c\u6362\u65e5\u5fd7"),
-            ("settings","\u2699 \u8bbe\u7f6e"),
-        ]
-        for nav_id, label in items:
-            btn = QPushButton(label)
-            btn.setObjectName("NavItem_" + nav_id)
-            btn.setFixedHeight(36)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                "QPushButton { text-align: left; padding: 0 16px; border: none; border-radius: 0; "
-                "background: transparent; color: #4E5969; font-size: 14px; }"
-                "QPushButton:hover { background: #E8E8E8; }"
-            )
-            btn.clicked.connect(lambda checked, nid=nav_id: self.nav_changed.emit(nid))
-            layout.addWidget(btn)
-            self._nav_btns.append((nav_id, btn))
-
-        layout.addStretch()
-
-    def set_active(self, nav_id):
-        for nid, btn in self._nav_btns:
-            if nid == nav_id:
-                btn.setStyleSheet(
-                    "QPushButton { text-align: left; padding: 0 16px; border: none; border-radius: 0; "
-                    "border-left: 3px solid #6366F1; background: #EEF2FF; color: #6366F1; "
-                    "font-size: 14px; font-weight: 600; }"
-                )
-            else:
-                btn.setStyleSheet(
-                    "QPushButton { text-align: left; padding: 0 16px; border: none; border-radius: 0; "
-                    "background: transparent; color: #4E5969; font-size: 14px; }"
-                    "QPushButton:hover { background: #E8E8E8; }"
-                )
-
-
-# ---- TopNavBar (v0.11.0 HTML spec) ----
 
 class TopNavBar(QFrame):
     nav_changed = Signal(str)
@@ -493,7 +261,7 @@ class TopNavBar(QFrame):
         logo.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #6366F1,stop:1 #8B5CF6); color: white; font-size: 18px; font-weight: 700; border-radius: 8px;")
         layout.addWidget(logo)
         title = QLabel("MD\u5de5\u5177")
-        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #222222; margin-left: 10px; margin-right: 40px;")
+        title.setObjectName("navTitle")
         layout.addWidget(title)
 
         # Nav items
@@ -541,11 +309,14 @@ class TopNavBar(QFrame):
         layout.addStretch()
 
         # Theme toggle
-        self._theme_btn = QPushButton("\u263e")
-        self._theme_btn.setFixedSize(28, 28)
-        self._theme_btn.setStyleSheet("QPushButton { background: transparent; border: none; font-size: 16px; border-radius: 4px; } QPushButton:hover { background: #F5F5F5; }")
+        self._theme_btn = QPushButton(chr(0x2600))
+        self._theme_btn.setObjectName("iconBtn")
+        self._theme_btn.setFixedSize(38, 38)
+        self._theme_btn.setToolTip("切换主题")
         layout.addWidget(self._theme_btn)
-        self.set_active("file")
+
+    def update_theme_icon(self, is_dark):
+        self._theme_btn.setText(chr(0x2600) if not is_dark else chr(0x263e))
 
     def set_active(self, nid):
         for anid, btn in self._nav_btns.items():

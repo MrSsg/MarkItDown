@@ -32,6 +32,7 @@ class DragBubble(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         w, h = self.width(), self.height()
         path = QPainterPath()
         path.addRoundedRect(0, 0, w, h, 14, 14)
@@ -95,7 +96,7 @@ class FloatWindow(QWidget):
         import os
         d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
         self._fp = {}
-        for s in [16, 32, 128]:
+        for s in [16, 32, 128, 256, 512]:
             p = os.path.join(d, "markconvert_float_" + str(s) + ".png")
             if os.path.isfile(p):
                 self._fp[s] = QPixmap(p)
@@ -305,17 +306,20 @@ class FloatWindow(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         r, w, h = self.rect(), self.rect().width(), self.rect().height()
         path = QPainterPath()
         path.addRoundedRect(0, 0, w, h, 14, 14)
         painter.setClipPath(path)
-        is_dark = self._theme.current_theme == "dark"
-        bg = QColor("#2d2d2d") if (self._state == State.COLLAPSED or is_dark) else QColor("#ffffff")
-        painter.fillRect(r, bg)
-        bw = 1
-        bc = QColor("#555" if is_dark else "#ccc")
-        painter.setPen(QPen(bc, bw))
-        painter.drawRoundedRect(0, 0, w - 1, h - 1, 14, 14)
+        # COLLAPSED: only icon PNG, no background fill or border
+        if self._state != State.COLLAPSED:
+            is_dark = self._theme.current_theme == "dark"
+            bg = QColor("#2d2d2d") if is_dark else QColor("#ffffff")
+            painter.fillRect(r, bg)
+            bw = 1
+            bc = QColor("#555" if is_dark else "#ccc")
+            painter.setPen(QPen(bc, bw))
+            painter.drawRoundedRect(0, 0, w - 1, h - 1, 14, 14)
         self._draw_png_icon(painter, w, h, min(w, h) - 8)
 
     def _draw_png_icon(self, painter, w, target_h, sz):
@@ -328,49 +332,3 @@ class FloatWindow(QWidget):
             painter.drawPixmap(x, y, sc)
 
 
-    def _draw_hover_text(self, painter, w):
-        is_dark = self._theme.current_theme == "dark"
-        painter.setFont(QFont("Segoe UI", 9))
-        painter.setPen(QColor("#d4d4d4" if is_dark else "#555"))
-        for i, line in enumerate(["拖拽", "文件", "到这里"]):
-            tw = painter.fontMetrics().horizontalAdvance(line)
-            painter.drawText((w - tw) // 2, 56 + i * 20, line)
-
-    def _draw_active(self, painter, w, h):
-        is_dark = self._theme.current_theme == "dark"
-        fg = QColor("#d4d4d4" if is_dark else "#333")
-        accent = QColor("#407BFF" if is_dark else "#407BFF")
-        gray = QColor("#888" if is_dark else "#999")
-        painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        painter.setPen(accent)
-        painter.drawText(16, 28, "MarkItDown")
-        painter.setPen(QPen(QColor("#444" if is_dark else "#ddd"), 1))
-        painter.drawLine(16, 38, w - 16, 38)
-        dr = (20, 45, w - 40, 140)
-        painter.setPen(QPen(QColor("#888" if is_dark else "#aaa"), 1.5, Qt.PenStyle.DashLine))
-        painter.setBrush(QColor(14, 99, 156, 15) if is_dark else QColor(0, 96, 192, 10))
-        painter.drawRoundedRect(*dr, 10, 10)
-        painter.setFont(QFont("Segoe UI", 10))
-        painter.setPen(fg)
-        painter.drawText(dr[0], dr[1] + 50, dr[2], 30, Qt.AlignmentFlag.AlignCenter, "拖拽文件到这里")
-        painter.setFont(QFont("Segoe UI", 8))
-        painter.setPen(gray)
-        painter.drawText(dr[0], dr[1] + 78, dr[2], 20, Qt.AlignmentFlag.AlignCenter, "PDF / DOCX / PPTX / 图片 / 音频")
-        painter.setFont(QFont("Segoe UI", 8))
-        painter.setPen(gray)
-        painter.drawText(16, 208, "最近")
-        y = 222
-        if self._history_entries:
-            for entry in self._history_entries[:3]:
-                painter.setPen(fg)
-                nm = entry.file_name
-                if painter.fontMetrics().horizontalAdvance(nm) > w - 32:
-                    nm = nm[:20] + "..."
-                painter.drawText(16, y, nm)
-                y += 18
-        else:
-            painter.setPen(gray)
-            painter.drawText(16, y, "暂无历史")
-        painter.setPen(gray)
-        painter.setFont(QFont("Segoe UI", 7))
-        painter.drawText(0, h - 18, w, 14, Qt.AlignmentFlag.AlignCenter, "拖拽文件进行转换")

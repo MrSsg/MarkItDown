@@ -13,13 +13,13 @@ class ConvertWorker(QObject):
         super().__init__(parent)
         self._thread = None
 
-    def start_convert(self, file_path):
+    def start_convert(self, file_path, enable_ocr=False):
         if self._thread is not None and self._thread.isRunning():
             self._thread.quit()
             if not self._thread.wait(3000):
                 self._thread.terminate()
                 self._thread.wait()
-        self._thread = _ConvertThread(file_path)
+        self._thread = _ConvertThread(file_path, enable_ocr)
         self._thread.result_ready.connect(self.finished)
         self._thread.error_occurred.connect(self.error)
         self.started.emit(file_path, _os.path.basename(file_path))
@@ -29,16 +29,17 @@ class _ConvertThread(QThread):
     result_ready = Signal(str, str)
     error_occurred = Signal(str, str)
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, enable_ocr=False):
         super().__init__()
         self._file_path = file_path
+        self._enable_ocr = enable_ocr
 
     def run(self):
         try:
             import warnings
             warnings.filterwarnings("ignore", category=RuntimeWarning, module="pydub")
             from markitdown import MarkItDown
-            md = MarkItDown(enable_plugins=False)
+            md = MarkItDown(enable_plugins=self._enable_ocr)
             result = md.convert(self._file_path)
             content = result.text_content
             self.result_ready.emit(content, self._file_path)

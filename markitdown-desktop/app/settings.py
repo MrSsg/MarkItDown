@@ -110,6 +110,26 @@ class AppSettings:
 
     # ── 历史条数 ──────────────────────────────────────────
 
+    # ── 悬浮窗开关 ────────────────────────────────────────
+
+    @property
+    def show_float_window(self) -> bool:
+        return self._settings.value("float/show", True, type=bool)
+
+    @show_float_window.setter
+    def show_float_window(self, val: bool) -> None:
+        self._settings.setValue("float/show", val)
+
+    # ── 关闭行为 ──────────────────────────────────────────
+
+    @property
+    def close_to_tray(self) -> bool:
+        return self._settings.value("window/close_to_tray", True, type=bool)
+
+    @close_to_tray.setter
+    def close_to_tray(self, val: bool) -> None:
+        self._settings.setValue("window/close_to_tray", val)
+
     @property
     def max_history(self) -> int:
         return self._settings.value("history/max", 50, type=int)
