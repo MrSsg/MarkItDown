@@ -306,3 +306,67 @@ Calls `_save_file(batch=True)` to batch-export all converted files.
   rapidly as cursor crossed widget boundary.
   **Fix:** Added `_bubble_hide_timer` (300ms debounce), `_bubble_visible` guard,
   and immediate hide on `dropEvent`. show/hide now idempotent.
+
+## v0.10.6 — DragBubble Restore + Queue Fixes (2026-07-16)
+
+**Bubble:** Restored standalone DragBubble widget with show/hide-only logic
+(created once in `__init__`, never `deleteLater`).
+Debounce timer (200ms) prevents rapid toggle flicker.
+
+**Queue fix:** `_process_next_in_queue` now skips files already in
+`_conversion_results` (no re-conversion).
+**Preview fix:** `_on_file_selected` sets `_file_manually_selected` flag;
+`_on_convert_finished` only auto-switches preview when flag is False.
+`_start_convert` clears the flag so first run auto-switches normally.
+
+## v0.10.7 — Clean Batch Conversion Rewrite (2026-07-16)
+
+Restored main_window.py from v0.8.0 backup, applied minimal batch logic:
+
+- Added `_conversion_results = {}` dict in __init__
+- Added `_process_next_in_queue()`: skips converted, marks status, converts next
+- Added `_on_file_selected()`: click queue item to preview its result
+- Updated `_start_convert()`: starts queue processing instead of single file
+- Updated `_on_convert_finished()`: stores result, advances queue
+- Updated `_on_convert_error()`: skips(error does not block queue)
+No ghost indentation, no duplicate methods, no file corruption.
+
+## v0.11.0 -- Full UI Refactor (2026-07-18)
+
+**Spec-driven redesign based on UI Development Spec.**
+
+**New layout:** Sidebar(240px) + TopBar(56px) + Stacked Content Pages
+**New components:** Sidebar navigation, stacked page system
+**Design tokens applied:** #F7F8FC bg, #FFFFFF cards, 8px radius, #407BFF primary
+**Cleanup:** Removed old icon assets no longer in use.
+**Pages (in progress):** Batch Convert, History Log, Settings
+
+## v0.11.0 phase 1 -- Sidebar + Page Framework (2026-07-18)
+
+**New:** Sidebar (240px) with 3 nav items (batch convert, history, settings)
+**New:** QStackedWidget with 3 pages for page-based navigation
+**New:** Page switching via sidebar clicks
+**New:** History page with full history list (synced with bottom panel)
+**Cleanup:** Removed old unused icon assets
+**Next:** Settings page implementation, history page filters, design tokens
+
+## v0.11.0 phase 2 -- Settings + History Pages (2026-07-18)
+
+**Settings page:** Save path, theme mode, history max entries, save button.
+Three helper methods: _browse_save_path, _load_settings_values, _save_settings_values.
+**History page:** Full history list synced with bottom panel.
+**Cleanup:** Removed old SettingsDialog references where superseded by in-page version.
+
+## v0.11.1 — HTML Reference Redesign (2026-07-18)
+
+**Complete layout restructured to match HTML reference.**
+
+**Old:** Sidebar(240px) + TopBar(tool buttons) + Content
+**New:** TopNavBar(nav + actions) + Content (grid: 280/1fr/380)
+
+**TopNavBar:** Logo "M" + gradient, nav items (文件/历史/设置),
+action buttons (导入/批量导入/清空/复制MD/导出), theme toggle
+**Brand color:** #6366F1 (indigo) with gradient to #8B5CF6
+**Card radius:** 12px, **Button radius:** 6-8px
+**Colors:** success #10B981, error #EF4444, warning #F59E0B
+**Removed:** Inline TopBar, Sidebar widget from main_window.py

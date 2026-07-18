@@ -9,7 +9,7 @@ from PySide6.QtGui import (QAction, QClipboard, QFont, QColor,
     QDragLeaveEvent, QDragMoveEvent)
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
-    QTextBrowser, QListWidget, QListWidgetItem, QLabel, QPushButton,
+    QTextBrowser, QListWidget, QStackedWidget, QListWidgetItem, QLabel, QPushButton,
     QStatusBar, QFileDialog, QMessageBox, QDialog, QDialogButtonBox,
     QRadioButton, QCheckBox, QSlider, QSpinBox, QComboBox, QFormLayout,
     QGroupBox, QSizePolicy, QApplication, QStyle, QGraphicsDropShadowEffect)
@@ -18,13 +18,15 @@ from .worker import ConvertWorker
 from .history import HistoryManager, HistoryEntry
 from .settings import AppSettings
 from .theme import ThemeManager
+from .widgets import (UploadPanel, TopNavBar, CollapsibleCard, DropArea, HistoryPanel)
+from .dialogs import SettingsDialog
 from app.__about__ import __version__, __app_name__
-TOPBAR_HEIGHT = 64
+
 CARD_RADIUS = 16
 
 
-from .widgets import TopBar, CollapsibleCard, DropArea, HistoryPanel, UploadPanel
-from .dialogs import SettingsDialog
+
+
 
 
 class ResettableSplitter(QSplitter):
@@ -67,13 +69,12 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         self.setCentralWidget(central)
+        # Sidebar + content layout
+
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
 
-        # Top Bar
-        self._topbar = TopBar()
-        root.addWidget(self._topbar)
+        # Top NavBar
 
         # Content area
         cw = QWidget()
@@ -130,7 +131,7 @@ class MainWindow(QMainWindow):
         self._save_btn = QPushButton("导出")
         self._save_btn.setObjectName("secondaryBtn")
         self._save_btn.setFixedHeight(30)
-        self._export_all_btn = QPushButton("导出全部")
+        self._export_all_btn = QPushButton("\u5bfc\u51fa\u5168\u90e8")
         self._export_all_btn.setObjectName("secondaryBtn")
         self._export_all_btn.setFixedHeight(30)
         ptb.addWidget(self._save_btn)
@@ -163,8 +164,86 @@ class MainWindow(QMainWindow):
         if saved_inner:
             self._inner_splitter.restoreState(saved_inner)
 
-        root.addWidget(self._outer_splitter, 1)
+        # Create QStackedWidget for page switching
+        self._pages = QStackedWidget()
+        self._pages.setContentsMargins(16, 16, 16, 0)
+
+        # Page 0: Batch convert (existing splitter content)
+        batch_page = QWidget()
+        batch_page.setContentsMargins(0, 0, 0, 16)
+        batch_layout = QVBoxLayout(batch_page)
+        batch_layout.setContentsMargins(0, 0, 0, 0)
+        batch_layout.addWidget(self._outer_splitter)
+        self._pages.addWidget(batch_page)
+
+        # Page 1: History
+        hist_page = QWidget()
+        hist_layout = QVBoxLayout(hist_page)
+        hist_layout.setContentsMargins(0, 0, 0, 0)
+        self._history_page_list = QListWidget()
+        hist_layout.addWidget(QLabel("\u8f6c\u6362\u65e5\u5fd7"))
+        hist_layout.addWidget(self._history_page_list)
+        self._pages.addWidget(hist_page)
+
+        # Page 2: Settings
+        settings_page = QWidget()
+        self._settings_page = settings_page
+        sl = QVBoxLayout(settings_page)
+        sl.setContentsMargins(32, 24, 32, 24)
+        sl.setSpacing(16)
+
+        # Save path group
+        g1 = QGroupBox("\u4fdd\u5b58\u8def\u5f84")
+        g1l = QVBoxLayout(g1)
+        self._path_lbl = QLabel(self._settings.default_save_path or "\uff08\u672a\u8bbe\u7f6e\uff09")
+        self._path_lbl.setWordWrap(True)
+        br = QHBoxLayout()
+        browse_btn = QPushButton("\u6d4f\u89c8...")
+        browse_btn.clicked.connect(self._browse_save_path)
+        self._ask_cb = QCheckBox("\u6bcf\u6b21\u8be2\u95ee\u4fdd\u5b58\u8def\u5f84")
+        self._ask_cb.toggled.connect(lambda c: browse_btn.setEnabled(not c))
+        br.addWidget(browse_btn); br.addWidget(self._ask_cb); br.addStretch()
+        g1l.addWidget(self._path_lbl); g1l.addLayout(br)
+        sl.addWidget(g1)
+
+        # Theme group
+        g2 = QGroupBox("\u4e3b\u9898")
+        g2l = QVBoxLayout(g2)
+        self._sys_rb = QRadioButton("\u8ddf\u968f\u7cfb\u7edf")
+        self._dark_rb = QRadioButton("\u6697\u8272\u6a21\u5f0f")
+        self._light_rb = QRadioButton("\u4eae\u8272\u6a21\u5f0f")
+        g2l.addWidget(self._sys_rb); g2l.addWidget(self._dark_rb); g2l.addWidget(self._light_rb)
+        sl.addWidget(g2)
+
+        # History group
+        g3 = QGroupBox("\u5386\u53f2\u8bb0\u5f55")
+        g3l = QVBoxLayout(g3)
+        hr = QHBoxLayout()
+        hr.addWidget(QLabel("\u6700\u5927\u4fdd\u7559\u6761\u6570:"))
+        self._max_spin = QSpinBox()
+        self._max_spin.setRange(10, 200)
+        hr.addWidget(self._max_spin); hr.addStretch()
+        g3l.addLayout(hr)
+        clear_btn = QPushButton("\u6e05\u7a7a\u5386\u53f2\u8bb0\u5f55")
+        clear_btn.clicked.connect(self._clear_history)
+        g3l.addWidget(clear_btn)
+        sl.addWidget(g3)
+
+        # Load values + save button
+        self._load_settings_values()
+        save_btn = QPushButton("\u4fdd\u5b58\u8bbe\u7f6e")
+        save_btn.clicked.connect(self._save_settings_values)
+        sl.addWidget(save_btn)
+        sl.addStretch()
+        self._pages.addWidget(settings_page)
+
+        root.addWidget(self._pages, 1)
+        
         # Status Bar
+        self._navbar = TopNavBar()
+        self._navbar.nav_changed.connect(self._on_nav_changed)
+        root.addWidget(self._navbar)
+
         self._status = QLabel("就绪")
         self.statusBar().addWidget(self._status, 1)
 
@@ -184,13 +263,12 @@ class MainWindow(QMainWindow):
         self._refresh_history()
 
     def _connect_signals(self):
-        self._topbar.tool_button("toolOpen").clicked.connect(self._open_file)
-        self._topbar.tool_button("toolConvert").clicked.connect(self._start_convert)
-        self._topbar.tool_button("toolCopy").clicked.connect(self._copy_to_clipboard)
-        self._topbar.tool_button("toolClear").clicked.connect(self._clear_content)
-        self._topbar.tool_button("toolMD").clicked.connect(self._toggle_preview_mode)
-        self._topbar.theme_btn.clicked.connect(self._theme.toggle)
-        self._topbar.settings_btn.clicked.connect(self._open_settings)
+        self._navbar._import_btn.clicked.connect(self._open_file)
+        self._navbar._batch_btn.clicked.connect(lambda: self._open_file())
+        self._navbar._clear_btn.clicked.connect(self._clear_content)
+        self._navbar._copy_btn.clicked.connect(self._copy_to_clipboard)
+        self._navbar._export_btn.clicked.connect(self._save_file)
+
         self._upload_panel.files_added.connect(self._on_files_dropped)
         self._upload_panel.convert_requested.connect(self._start_convert)
         self._upload_panel._select_btn.clicked.connect(self._open_file)
@@ -205,7 +283,7 @@ class MainWindow(QMainWindow):
         self._theme.theme_changed.connect(self._on_theme_changed)
 
     def _on_theme_changed(self, theme):
-        self._topbar.update_theme_icon(theme == "dark")
+
         if self._current_markdown:
             self._render_markdown(self._current_markdown)
 
@@ -225,13 +303,31 @@ class MainWindow(QMainWindow):
             if os.path.isfile(p) and p not in self._file_list:
                 self._file_list.append(p)
         self._refresh_file_list()
-        self._status.setText(f"已加入 {len(self._file_list)} 个文件")
         self._status.setText(f"已加载 {len(self._file_list)} 个文件")
 
     def _refresh_file_list(self):
         self._upload_panel.clear_queue()
         for p in self._file_list:
             self._upload_panel.add_file(p)
+
+    def _process_next_in_queue(self):
+        while self._queue_index < len(self._file_list):
+            path = self._file_list[self._queue_index]
+            if not os.path.isfile(path):
+                self._queue_index += 1
+                continue
+            if path in self._conversion_results:
+                if hasattr(self, "_upload_panel"):
+                    self._upload_panel.set_item_status(self._queue_index, "success")
+                self._queue_index += 1
+                continue
+            if hasattr(self, "_upload_panel"):
+                self._upload_panel.set_item_status(self._queue_index, "converting")
+            self._status.setText(f"\u8f6c\u6362\u4e2d ({self._queue_index+1}/{len(self._file_list)}): {os.path.basename(path)}")
+            self._convert_file(path)
+            return
+        self._queue_running = False
+        self._status.setText(f"\u2705 \u5168\u90e8\u5b8c\u6210 ({len(self._file_list)} \u4e2a\u6587\u4ef6)")
 
     def _start_convert(self):
         if not self._file_list:
@@ -249,10 +345,10 @@ class MainWindow(QMainWindow):
 
     def _on_file_selected(self, file_path):
         if file_path in self._conversion_results:
-            self._current_file = file_path
-            self._current_markdown = self._conversion_results[file_path]
-            self._render_markdown(self._current_markdown)
-            self._status.setText(f"预览: {os.path.basename(file_path)}")
+            self._render_markdown(self._conversion_results[file_path])
+            self._status.setText(f"\u9884\u89c8: {os.path.basename(file_path)}")
+        else:
+            self._status.setText(f"\u26a0\ufe0f \u6587\u4ef6\u672a\u8f6c\u6362: {os.path.basename(file_path)} (\u5df2\u8f6c {len(self._conversion_results)}\u4e2a)")
 
     @Slot(str, str)
     def _on_convert_started(self, file_path, file_name):
@@ -271,21 +367,25 @@ class MainWindow(QMainWindow):
         self._convert_btn.setEnabled(True)
         self._convert_btn.setText("开始转换")
         self._status.setText(f"完成 ({elapsed:.1f}s)")
-        self._render_markdown(markdown)
         self._conversion_results[file_path] = markdown
+        if not getattr(self, "_file_manually_selected", False):
+            self._render_markdown(markdown)
         entry = HistoryManager.make_entry(file_path, markdown)
+        self.history_mgr.add(entry)
+        self._refresh_history()
+        if hasattr(self, "_queue_index"):
+            self._upload_panel.set_item_status(self._queue_index, "success")
+            self._queue_index += 1
+            self._process_next_in_queue()
         self.history_mgr.add(entry)
         self._refresh_history()
 
     @Slot(str, str)
     def _on_convert_error(self, error_msg, file_path):
+        self._convert_btn.setEnabled(True)
+        self._convert_btn.setText("开始转换")
         self._status.setText("转换失败")
-        if hasattr(self, "_queue_index"):
-            self._upload_panel.set_item_status(self._queue_index, "error")
-            self._queue_index += 1
-            self._process_next_in_queue()
-        else:
-            QMessageBox.warning(self, "转换失败", error_msg)
+        QMessageBox.warning(self, "转换失败", error_msg)
 
     def _toggle_preview_mode(self):
         txt = self._view_mode_btn.text()
@@ -364,9 +464,9 @@ class MainWindow(QMainWindow):
     def _save_file(self, batch=False):
         if batch:
             if not self._conversion_results:
-                QMessageBox.information(self, "提示", "没有可导出的文件。")
+                QMessageBox.information(self, "\u63d0\u793a", "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u6587\u4ef6")
                 return
-            folder = QFileDialog.getExistingDirectory(self, "选择导出目标文件夹")
+            folder = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u5bfc\u51fa\u76ee\u6807\u6587\u4ef6\u5939")
             if not folder:
                 return
             success = 0
@@ -379,7 +479,7 @@ class MainWindow(QMainWindow):
                     success += 1
                 except Exception:
                     pass
-            self._status.setText(f"✅ 已导出 {success}/{len(self._conversion_results)} 个文件")
+            self._status.setText(f"\u2705 \u5df2\u5bfc\u51fa {success}/{len(self._conversion_results)} \u4e2a\u6587\u4ef6")
             return
         if not self._current_markdown:
             QMessageBox.information(self, "提示", "没有可保存的内容。")
@@ -418,6 +518,31 @@ class MainWindow(QMainWindow):
         self._preview.clear()
         self._status.setText("已清空")
 
+    def _browse_save_path(self):
+        path = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u9ed8\u8ba4\u4fdd\u5b58\u8def\u5f84")
+        if path:
+            self._settings.default_save_path = path
+            self._path_lbl.setText(path)
+            self._settings.sync()
+
+    def _load_settings_values(self):
+        mode = self._settings.theme_mode or "system"
+        if mode == "system": self._sys_rb.setChecked(True)
+        elif mode == "dark": self._dark_rb.setChecked(True)
+        else: self._light_rb.setChecked(True)
+        self._ask_cb.setChecked(self._settings.ask_save_each_time)
+        self._max_spin.setValue(self._settings.max_history)
+
+    def _save_settings_values(self):
+        if self._sys_rb.isChecked(): self._settings.theme_mode = "system"
+        elif self._dark_rb.isChecked(): self._settings.theme_mode = "dark"
+        else: self._settings.theme_mode = "light"
+        self._settings.ask_save_each_time = self._ask_cb.isChecked()
+        self._settings.max_history = self._max_spin.value()
+        self._settings.sync()
+        self._theme.set_mode(self._settings.theme_mode)
+        self._status.setText("\u8bbe\u7f6e\u5df2\u4fdd\u5b58")
+
     def _open_settings(self):
         dlg = SettingsDialog(self._settings, self._theme, self)
         dlg.exec()
@@ -425,6 +550,8 @@ class MainWindow(QMainWindow):
 
     def _clear_history(self):
         self.history_mgr.clear()
+        if hasattr(self, "_history_page_list"):
+            self._history_page_list.clear()
         self._refresh_history()
 
     def _refresh_history(self):
@@ -454,33 +581,11 @@ class MainWindow(QMainWindow):
         return f"{size:.1f} TB"
 
 
-    def _show_about(self):
-        from app.__about__ import __version__ as _av, __app_name__ as _an
-        from app.updater import get_local_kernel_version as _kv, check_latest_release as _cr
-        _k = _kv()
-        _r = _cr()
-        _m = f"<h3>{_an} v{_av}</h3>"
-        _m += f"<p>内核: <b>markitdown v{_k}</b></p>"
-        if _r:
-            if _r.version > _k:
-                _m += f'<p style="color:#407BFF">📦 新内核 <b>v{_r.version}</b> 可用</p>'
-                _m += f'<p><a href="{_r.html_url}">查看发布页</a></p>'
-            else:
-                _m += '<p style="color:#4CAF50">✅ 内核已是最新</p>'
-        else:
-            _m += '<p style="color:#888">未能检查更新（网络不可达）</p>'
-        _m += "<hr><p style='color:#888'>基于 Microsoft MarkItDown 的桌面转换工具</p>"
-        QMessageBox.about(self, f"关于 {_an}", _m)
-
-    def _check_update_background(self):
-        from app.updater import check_latest_release as _cr, get_local_kernel_version as _kv
-        try:
-            _r = _cr()
-            _k = _kv()
-            if _r and _r.version > _k:
-                self._status.setText(f"📦 新内核 v{_r.version} 可用（点击设置查看）")
-        except Exception:
-            pass
+    def _on_nav_changed(self, nav_id):
+        """Handle sidebar navigation."""
+        self._navbar.set_active(nav_id)
+        if nav_id == "settings":
+            self._open_settings()
 
     def closeEvent(self, event):
         self._settings.window_geometry = self.saveGeometry()

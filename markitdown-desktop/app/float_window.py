@@ -2,7 +2,7 @@
 
 import enum
 from PySide6.QtCore import (Qt, QRect, QPoint, QRectF, QTimer, Signal, QPropertyAnimation, QEasingCurve)
-from PySide6.QtGui import (QPainter, QColor, QPainterPath, QFont, QAction, QPen, QPixmap, QIcon, QRadialGradient, QBrush)
+from PySide6.QtGui import (QPainter, QColor, QPainterPath, QFont, QFontMetrics, QAction, QPen, QPixmap, QIcon, QRadialGradient, QBrush)
 from PySide6.QtWidgets import QWidget, QApplication, QMenu
 from .theme import ThemeManager
 
@@ -18,51 +18,45 @@ class State(enum.Enum):
 
 
 
+
 class DragBubble(QWidget):
-    """Separate bubble tip window for file drag feedback."""
     def __init__(self):
         super().__init__(None)
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
-        )
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self._text = "\U0001f4c4 \u62d6\u62fd\u6587\u4ef6\u5230\u6b64\u5f00\u59cb\u8f6c\u6362"
-        self.setFixedSize(230, 44)
+        fm = QFontMetrics(QFont("Segoe UI", 10))
+        self.setFixedSize(fm.horizontalAdvance(self._text) + 32, 44)
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r, w, h = self.rect(), self.rect().width(), self.rect().height()
+        w, h = self.width(), self.height()
         path = QPainterPath()
         path.addRoundedRect(0, 0, w, h, 14, 14)
         p.setClipPath(path)
-        p.fillRect(r, QColor(0, 0, 0, 200))
+        p.fillRect(self.rect(), QColor(0, 0, 0, 200))
         p.setPen(QPen(QColor(255, 255, 255, 25), 1))
         p.drawRoundedRect(0, 0, w - 1, h - 1, 14, 14)
         p.setPen(QColor(255, 255, 255))
-        p.setFont(QFont('Segoe UI', 10))
-        p.drawText(r, Qt.AlignmentFlag.AlignCenter, self._text)
+        p.setFont(QFont("Segoe UI", 10))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._text)
 
     def show_near(self, float_geo, edge, screen_geo):
         bw, bh = self.width(), self.height()
         sp = 12
-        if edge == 'left':
-            x, y = float_geo.right() + sp, float_geo.center().y() - bh // 2
-        elif edge == 'right':
-            x, y = float_geo.left() - bw - sp, float_geo.center().y() - bh // 2
-        elif edge == 'top':
-            x, y = float_geo.center().x() - bw // 2, float_geo.bottom() + sp
-        elif edge == 'bottom':
-            x, y = float_geo.center().x() - bw // 2, float_geo.top() - bh - sp
+        cx = float_geo.center().x()
+        x = max(screen_geo.left() + 5, min(cx - bw // 2, screen_geo.right() - bw - 5))
+        if float_geo.top() - sp - bh >= screen_geo.top() + 5:
+            y = float_geo.top() - sp - bh
         else:
-            x, y = float_geo.right() + sp, float_geo.center().y() - bh // 2
-        x = max(screen_geo.left() + 5, min(x, screen_geo.right() - bw - 5))
+            y = float_geo.bottom() + sp
         y = max(screen_geo.top() + 5, min(y, screen_geo.bottom() - bh - 5))
         self.move(x, y)
         self.show()
+
+
 class FloatWindow(QWidget):
     file_dropped = Signal(str)
     show_main_requested = Signal()
@@ -77,10 +71,14 @@ class FloatWindow(QWidget):
         self._drag_start = None
         self._drag_orig = None
         self._history_entries = []
+
+        self._bubble = DragBubble()  # single instance
         self._hovered = False
         self._dragging = False
         self._file_drag_active = False
-        self._bubble = None
+        self._bubble_hide_timer = QTimer(self)
+        self._bubble_hide_timer.setSingleShot(True)
+        self._bubble_hide_timer.timeout.connect(self._hide_bubble)
         self._load_icons()
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -89,10 +87,7 @@ class FloatWindow(QWidget):
         self._collapse_timer = QTimer(self)
         self._collapse_timer.setSingleShot(True)
         self._collapse_timer.timeout.connect(self._on_collapse_timeout)
-        self._bubble_hide_timer = QTimer(self)
-        self._bubble_hide_timer.setSingleShot(True)
-        self._bubble_hide_timer.timeout.connect(self._hide_bubble)
-        self._bubble_visible = False
+
         self._restore_position()
         self._theme.theme_changed.connect(self.update)
 
@@ -104,6 +99,18 @@ class FloatWindow(QWidget):
             p = os.path.join(d, "markconvert_float_" + str(s) + ".png")
             if os.path.isfile(p):
                 self._fp[s] = QPixmap(p)
+
+    def _show_bubble(self):
+        if hasattr(self, "_bubble_hide_timer"):
+            self._bubble_hide_timer.stop()
+        if not self._bubble.isVisible():
+            sg = self.screen().geometry() if self.screen() else None
+            if sg:
+                self._bubble.show_near(self.geometry(), self._edge, sg)
+
+    def _hide_bubble(self):
+        if self._bubble.isVisible():
+            self._bubble.hide()
 
     def set_history_entries(self, entries):
         self._history_entries = entries
@@ -249,28 +256,10 @@ class FloatWindow(QWidget):
         if self._edge is not None:
             self._start_collapse_timer()
 
-    def _show_bubble(self):
-        if self._bubble_visible:
-            return
-        self._bubble_visible = True
-        if not self._bubble:
-            self._bubble = DragBubble()
-        sg = self.screen().geometry() if self.screen() else None
-        if sg:
-            self._bubble.show_near(self.geometry(), self._edge, sg)
 
-    def _hide_bubble(self):
-        if not self._bubble_visible:
-            return
-        self._bubble_visible = False
-        if self._bubble:
-            self._bubble.hide()
-            self._bubble.deleteLater()
-            self._bubble = None
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            self._bubble_hide_timer.stop()
             self._file_drag_active = True
             self._show_bubble()
             self._stop_collapse_timer()
@@ -283,13 +272,17 @@ class FloatWindow(QWidget):
 
     def dragLeaveEvent(self, event):
         self._file_drag_active = False
-        self._bubble_hide_timer.start(300)
+        self._bubble_hide_timer.stop()
+        self._hide_bubble()
+        self._bubble_hide_timer.start(200)
         self._start_collapse_timer()
         self.update()
 
     def dropEvent(self, event):
         self._file_drag_active = False
-        self._bubble_hide_timer.start(300)
+        self._bubble_hide_timer.stop()
+        self._hide_bubble()
+        self._bubble_hide_timer.start(200)
         self._start_collapse_timer()
         self.show_main_requested.emit()
         for url in event.mimeData().urls():

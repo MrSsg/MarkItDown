@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Widgets: TopBar, CollapsibleCard, DropArea, HistoryPanel."""
 
-from PySide6.QtCore import Qt, QRect, QPoint, QTimer, Signal
-from PySide6.QtGui import QPainter, QColor, QPen, QFont
+from PySide6.QtCore import Qt, QRect, QPoint, QTimer, Signal, QSize
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QPixmap, QIcon
 from PySide6.QtWidgets import (QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QListWidget, QListWidgetItem, QFileDialog, QMessageBox,
     QMenu, QApplication,
@@ -28,7 +28,7 @@ class TopBar(QFrame):
         logo.setAlignment(Qt.AlignCenter)
         f = logo.font(); f.setBold(True); f.setPointSize(12)
         logo.setFont(f)
-        logo.setStyleSheet("background: #407BFF; color: white; border-radius: 9px;")
+        logo.setStyleSheet("background: #6366F1; color: white; border-radius: 9px;")
         left.addWidget(logo)
         name_lbl = QLabel("MarkConvert Desk")
         name_lbl.setStyleSheet("font-size: 18px; font-weight: 600; padding: 0 4px;")
@@ -60,15 +60,46 @@ class TopBar(QFrame):
             b.setFixedHeight(36)
             center.addWidget(b)
             self._tool_btns[obj_id] = b
+        # Set PNG icons for tool buttons
+        import os
+        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+        icon_names = {"toolOpen": "open_file.png", "toolConvert": "Convert.png", "toolCopy": "copy.png", "toolClear": "delete.png"}
+        for obj_id, fname in icon_names.items():
+            if obj_id in self._tool_btns:
+                fp = os.path.join(assets_dir, fname)
+                if os.path.isfile(fp):
+                    pixmap = QPixmap(fp)
+                    if not pixmap.isNull():
+                        self._tool_btns[obj_id].setIcon(QIcon(pixmap))
+                        self._tool_btns[obj_id].setIconSize(QSize(20, 20))
+                        self._tool_btns[obj_id].setText("")
         layout.addLayout(center)
         right = QHBoxLayout()
         right.setSpacing(4)
         self._theme_btn = QPushButton(chr(0x2600))
+        fp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "theme.png")
+        if os.path.isfile(fp):
+            pix = QPixmap(fp)
+            if not pix.isNull():
+                self._theme_btn.setIcon(QIcon(pix))
+                self._theme_btn.setIconSize(QSize(20, 20))
+                self._theme_btn.setText("")
+        self._theme_btn.setIconSize(QSize(20, 20))
+        self._theme_btn.setText("")
         self._theme_btn.setObjectName("iconBtn")
         self._theme_btn.setFixedSize(38, 38)
         self._theme_btn.setToolTip("切换主题")
         right.addWidget(self._theme_btn)
         self._settings_btn = QPushButton(chr(0x2699))
+        fp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "setting.png")
+        if os.path.isfile(fp):
+            pix = QPixmap(fp)
+            if not pix.isNull():
+                self._settings_btn.setIcon(QIcon(pix))
+                self._settings_btn.setIconSize(QSize(20, 20))
+                self._settings_btn.setText("")
+        self._settings_btn.setIconSize(QSize(20, 20))
+        self._settings_btn.setText("")
         self._settings_btn.setObjectName("iconBtn")
         self._settings_btn.setFixedSize(38, 38)
         self._settings_btn.setToolTip("设置")
@@ -156,7 +187,7 @@ class UploadPanel(QWidget):
         self._drop_zone.setAcceptDrops(True)
         self._drop_zone.setStyleSheet(
             'QLabel#UploadDropZone { border: 2px dashed #C9CDD4; border-radius: 16px; background: #FAFBFC; color: #86909C; font-size: 13px; }'
-            'QLabel#UploadDropZone:hover { border-color: #407BFF; background: #F0F7FF; }'
+            'QLabel#UploadDropZone:hover { border-color: #6366F1; background: #F0F7FF; }'
         )
         self._drop_zone.setText(chr(0x1F4C2) + chr(10) + chr(10) + chr(25351) + chr(25512) + chr(25991) + chr(20214) + chr(21040) + chr(27492) + chr(22788) + chr(19978) + chr(20256))
         layout.addWidget(self._drop_zone)
@@ -179,7 +210,7 @@ class UploadPanel(QWidget):
         # --- Select file button ---
         self._select_btn = QPushButton(chr(0x1F4C2) + chr(32) + chr(36873) + chr(25321) + chr(25991) + chr(20214))
         self._select_btn.setObjectName("secondaryBtn")
-        self._select_btn.setStyleSheet("QPushButton#secondaryBtn { background: #F2F3F5; color: #4E5969; border: 1px solid #E5E6EB; border-radius: 12px; padding: 8px 16px; }")
+        self._select_btn.setStyleSheet("QPushButton#secondaryBtn { background: #F2F3F5; color: #4E5969; border: 1px solid #E8E8E8; border-radius: 12px; padding: 8px 16px; }")
         layout.addWidget(self._select_btn)
 
         # --- Queue list ---
@@ -194,7 +225,7 @@ class UploadPanel(QWidget):
         btn_row.setSpacing(8)
         self._convert_btn = QPushButton(chr(0x1F680) + chr(32) + chr(19968) + chr(38190) + chr(36716) + chr(25442))
         self._convert_btn.setObjectName("primaryAction")
-        self._convert_btn.setStyleSheet("QPushButton#primaryAction { background: #407BFF; color: white; font-size: 14px; font-weight: 600; padding: 10px 24px; }")
+        self._convert_btn.setStyleSheet("QPushButton#primaryAction { background: #6366F1; color: white; font-size: 14px; font-weight: 600; padding: 10px 24px; }")
         self._new_btn = QPushButton(chr(0x2795) + chr(32) + chr(26032) + chr(24314) + chr(36716) + chr(25442))
         self._new_btn.setObjectName("secondaryBtn")
         btn_row.addWidget(self._convert_btn)
@@ -231,7 +262,7 @@ class UploadPanel(QWidget):
 
     def _update_item_status(self, idx, status):
         labels = {"queued": (chr(0x23F3) + " 排队中", "#86909C"),
-                  "converting": (chr(0x26A1) + " 转换中", "#407BFF"),
+                  "converting": (chr(0x26A1) + " 转换中", "#6366F1"),
                   "success": (chr(0x2705) + " 成功", "#00B42A"),
                   "error": (chr(0x274C) + " 失败", "#F53F3F")}
         text, color = labels.get(status, (status, "#86909C"))
@@ -265,7 +296,7 @@ class UploadPanel(QWidget):
     def _on_drag_enter(self, event):
         if event.mimeData().hasUrls():
             self._drop_zone.setStyleSheet(
-                'QLabel#UploadDropZone { border: 2px solid #407BFF; border-radius: 16px; background: #F0F7FF; color: #407BFF; font-size: 13px; }'
+                'QLabel#UploadDropZone { border: 2px solid #6366F1; border-radius: 16px; background: #F0F7FF; color: #6366F1; font-size: 13px; }'
             )
             event.acceptProposedAction()
 
@@ -383,3 +414,153 @@ class HistoryPanel(QFrame):
     def set_count(self, n):
         self._count_lbl.setText(f"{n} records" if n else "")
 
+
+
+# ---- Sidebar Navigation (v0.11.0) ----
+
+class Sidebar(QFrame):
+    nav_changed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Sidebar")
+        self.setFixedWidth(240)
+        self.setStyleSheet("QFrame#Sidebar { background: #F5F5F5; border-right: 1px solid #E8E8E8; }")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Logo
+        logo = QLabel("M")
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setFixedHeight(56)
+        logo.setStyleSheet(
+            "QLabel { background: #6366F1; color: white; font-size: 20px; font-weight: 700; "
+            "border-radius: 0; }"
+        )
+        layout.addWidget(logo)
+
+        # Nav items
+        self._nav_btns = []
+        items = [
+            ("batch",   "\U0001f4e6 \u6279\u91cf\u8f6c\u6362"),
+            ("history", "\U0001f4cb \u8f6c\u6362\u65e5\u5fd7"),
+            ("settings","\u2699 \u8bbe\u7f6e"),
+        ]
+        for nav_id, label in items:
+            btn = QPushButton(label)
+            btn.setObjectName("NavItem_" + nav_id)
+            btn.setFixedHeight(36)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 0 16px; border: none; border-radius: 0; "
+                "background: transparent; color: #4E5969; font-size: 14px; }"
+                "QPushButton:hover { background: #E8E8E8; }"
+            )
+            btn.clicked.connect(lambda checked, nid=nav_id: self.nav_changed.emit(nid))
+            layout.addWidget(btn)
+            self._nav_btns.append((nav_id, btn))
+
+        layout.addStretch()
+
+    def set_active(self, nav_id):
+        for nid, btn in self._nav_btns:
+            if nid == nav_id:
+                btn.setStyleSheet(
+                    "QPushButton { text-align: left; padding: 0 16px; border: none; border-radius: 0; "
+                    "border-left: 3px solid #6366F1; background: #EEF2FF; color: #6366F1; "
+                    "font-size: 14px; font-weight: 600; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton { text-align: left; padding: 0 16px; border: none; border-radius: 0; "
+                    "background: transparent; color: #4E5969; font-size: 14px; }"
+                    "QPushButton:hover { background: #E8E8E8; }"
+                )
+
+
+# ---- TopNavBar (v0.11.0 HTML spec) ----
+
+class TopNavBar(QFrame):
+    nav_changed = Signal(str)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("TopNavBar")
+        self.setFixedHeight(56)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(24, 0, 24, 0)
+        layout.setSpacing(0)
+
+        # Logo
+        logo = QLabel("M")
+        logo.setFixedSize(36, 36)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #6366F1,stop:1 #8B5CF6); color: white; font-size: 18px; font-weight: 700; border-radius: 8px;")
+        layout.addWidget(logo)
+        title = QLabel("MD\u5de5\u5177")
+        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #222222; margin-left: 10px; margin-right: 40px;")
+        layout.addWidget(title)
+
+        # Nav items
+        layout.addSpacing(20)
+        self._nav_btns = {}
+        nav_items = [("file", "\u6587\u4ef6"), ("history", "\u5386\u53f2"), ("settings", "\u8bbe\u7f6e")]
+        for nid, lbl in nav_items:
+            btn = QPushButton(lbl)
+            btn.setFixedHeight(36)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { border: none; background: transparent; color: #666; font-size: 14px; padding: 0 16px; }"
+                "QPushButton:hover { color: #6366F1; }"
+            )
+            btn.clicked.connect(lambda checked, i=nid: self.nav_changed.emit(i))
+            layout.addWidget(btn)
+            self._nav_btns[nid] = btn
+        layout.addSpacing(24)
+
+        # Action buttons
+        self._import_btn = QPushButton("\u5bfc\u5165")
+        self._import_btn.setStyleSheet("QPushButton { background: #6366F1; color: white; border: none; border-radius: 6px; padding: 6px 16px; font-size: 13px; } QPushButton:hover { background: #818CF8; }")
+        layout.addWidget(self._import_btn)
+        layout.addSpacing(8)
+
+        self._batch_btn = QPushButton("\u6279\u91cf\u5bfc\u5165")
+        self._batch_btn.setStyleSheet("QPushButton { background: transparent; color: #666; border: 1px solid #DDD; border-radius: 6px; padding: 6px 16px; font-size: 13px; } QPushButton:hover { border-color: #6366F1; color: #6366F1; }")
+        layout.addWidget(self._batch_btn)
+        layout.addSpacing(8)
+
+        self._clear_btn = QPushButton("\u6e05\u7a7a")
+        self._clear_btn.setStyleSheet("QPushButton { background: transparent; color: #EF4444; border: 1px solid #FECACA; border-radius: 6px; padding: 6px 16px; font-size: 13px; } QPushButton:hover { background: #FEF2F2; }")
+        layout.addWidget(self._clear_btn)
+        layout.addSpacing(8)
+
+        self._copy_btn = QPushButton("\u590d\u5236MD")
+        self._copy_btn.setStyleSheet("QPushButton { background: transparent; color: #666; border: 1px solid #DDD; border-radius: 6px; padding: 6px 16px; font-size: 13px; } QPushButton:hover { border-color: #6366F1; color: #6366F1; }")
+        layout.addWidget(self._copy_btn)
+        layout.addSpacing(8)
+
+        self._export_btn = QPushButton("\u5bfc\u51fa")
+        self._export_btn.setStyleSheet("QPushButton { background: transparent; color: #666; border: 1px solid #DDD; border-radius: 6px; padding: 6px 16px; font-size: 13px; } QPushButton:hover { border-color: #6366F1; color: #6366F1; }")
+        layout.addWidget(self._export_btn)
+
+        layout.addStretch()
+
+        # Theme toggle
+        self._theme_btn = QPushButton("\u263e")
+        self._theme_btn.setFixedSize(28, 28)
+        self._theme_btn.setStyleSheet("QPushButton { background: transparent; border: none; font-size: 16px; border-radius: 4px; } QPushButton:hover { background: #F5F5F5; }")
+        layout.addWidget(self._theme_btn)
+        self.set_active("file")
+
+    def set_active(self, nid):
+        for anid, btn in self._nav_btns.items():
+            if anid == nid:
+                btn.setStyleSheet(
+                    "QPushButton { border: none; background: transparent; color: #6366F1; font-weight: 600; font-size: 14px; padding: 0 16px; }"
+                    "QPushButton:hover { color: #818CF8; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton { border: none; background: transparent; color: #666; font-size: 14px; padding: 0 16px; }"
+                    "QPushButton:hover { color: #6366F1; }"
+                )
