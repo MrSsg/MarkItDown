@@ -628,3 +628,61 @@ the full `markitdown` package just to read a version string.
 
 **Version sync:**
 - `app/__about__.py` updated to `1.1.2` so runtime title/version matches the actual release track
+
+
+## v1.1.3 — Kernel Version Fallback Fix (2026-07-19)
+
+**Bug fix:** `get_local_kernel_version()` now falls back to
+`from markitdown.__about__ import __version__` and then to the local source
+checkout file if package metadata is unavailable.
+
+**Why:** the previous fallback depended on distribution metadata and could
+collapse to `0.0.0` in environments where the kernel package metadata was not
+discoverable.
+
+**Result:** the kernel version should now resolve to the real upstream value
+(`0.1.6`) instead of `0.0.0` or `unknown` in normal app runs.
+
+
+## v1.1.4 — About Version Fallback Fix (2026-07-19)
+
+**Fix:** `get_local_kernel_version()` now checks the loaded `markitdown`
+module location via `find_spec("markitdown")` and reads `__about__.py`
+directly from that package when metadata lookup fails.
+
+**Reason:** some exe runs could not see package metadata, so the earlier
+fallback chain still landed on `unknown` even though the bundled kernel
+files were present.
+
+**Expected result:** the About dialog should show `markitdown v0.1.6`
+instead of `unknown`.
+
+
+## v1.1.5 — Packaged Kernel Version Fix (2026-07-19)
+
+**Fix:** bundled `packages/markitdown/src/markitdown/__about__.py` into the exe
+and changed the fallback path in `get_local_kernel_version()` to use
+`sys._MEIPASS` when frozen.
+
+**Why:** the previous fallback used a source-tree path base that did not line up
+with the frozen exe layout, so the packaged app still fell through to `unknown`.
+
+**Expected result:** About in the exe should now show the real kernel version
+instead of `unknown`.
+
+**Packaging path fix:** the bundled `__about__.py` is now referenced from
+`../packages/markitdown/src/markitdown/__about__.py` in `build.spec`, matching
+the repository layout used during packaging.
+
+
+## v1.1.5-fast — Onedir Fast Build (2026-07-19)
+
+**New build target:** `build_fast.spec`
+
+**What changed:**
+- Switched packaging mode from single-file to `onedir`
+- Disabled UPX compression for faster process startup
+- Kept the same runtime feature set and bundled the same kernel version source
+
+**Expected effect:** faster app launch at the cost of a larger folder-based
+distribution instead of one standalone exe.

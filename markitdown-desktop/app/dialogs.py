@@ -17,6 +17,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(460)
         self._build_ui()
         self._load_values()
+        self._populate_about_info()
         QTimer.singleShot(0, self._populate_about_info)
 
     def _check_and_show_update(self):

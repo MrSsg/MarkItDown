@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from importlib import metadata as importlib_metadata
+from importlib import util as importlib_util
 from pathlib import Path
 from typing import Optional, Tuple, Callable
 from urllib import error as urlerror
@@ -35,24 +36,46 @@ class ReleaseInfo:
 
 _KERNEL_VERSION_CACHE: str = ""
 
+def _read_version_file(path: Path) -> str | None:
+    try:
+        namespace = {}
+        with open(path, "r", encoding="utf-8") as f:
+            exec(f.read(), namespace)
+        version = str(namespace.get("__version__", "")).strip()
+        return version or None
+    except Exception:
+        return None
+
+
 def get_local_kernel_version() -> str:
     global _KERNEL_VERSION_CACHE
     if _KERNEL_VERSION_CACHE:
         return _KERNEL_VERSION_CACHE
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
     try:
         _KERNEL_VERSION_CACHE = importlib_metadata.version("markitdown")
         return _KERNEL_VERSION_CACHE
     except Exception:
         pass
     try:
-        about_spec = importlib_metadata.distribution("markitdown").locate_file("markitdown/__about__.py")
-        namespace = {}
-        with open(about_spec, "r", encoding="utf-8") as f:
-            exec(f.read(), namespace)
-        _KERNEL_VERSION_CACHE = str(namespace.get("__version__", "0.0.0"))
-        return _KERNEL_VERSION_CACHE
+        spec = importlib_util.find_spec("markitdown")
+        if spec and spec.submodule_search_locations:
+            pkg_dir = Path(next(iter(spec.submodule_search_locations)))
+            version = _read_version_file(pkg_dir / "__about__.py")
+            if version:
+                _KERNEL_VERSION_CACHE = version
+                return _KERNEL_VERSION_CACHE
     except Exception:
-        return "0.0.0"
+        pass
+    try:
+        local_about = bundle_root / "packages" / "markitdown" / "src" / "markitdown" / "__about__.py"
+        version = _read_version_file(local_about)
+        if version:
+            _KERNEL_VERSION_CACHE = version
+            return _KERNEL_VERSION_CACHE
+    except Exception:
+        pass
+    return "unknown"
 
 
 def _open_json_url(url: str, timeout: int = 15) -> Optional[dict]:
