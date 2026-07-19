@@ -1,9 +1,17 @@
 # SPDX-License-Identifier: MIT
 """Update checker and installer for markitdown kernel."""
 
-import os, sys, shutil, subprocess, json, tempfile
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Optional, Tuple, Callable
+from urllib import error as urlerror
+from urllib import request as urlrequest
 from zipfile import ZipFile
 from dataclasses import dataclass
 
@@ -32,11 +40,35 @@ def get_local_kernel_version() -> str:
     if _KERNEL_VERSION_CACHE:
         return _KERNEL_VERSION_CACHE
     try:
-        from markitdown.__about__ import __version__
-        _KERNEL_VERSION_CACHE = __version__
-        return __version__
+        _KERNEL_VERSION_CACHE = importlib_metadata.version("markitdown")
+        return _KERNEL_VERSION_CACHE
+    except Exception:
+        pass
+    try:
+        about_spec = importlib_metadata.distribution("markitdown").locate_file("markitdown/__about__.py")
+        namespace = {}
+        with open(about_spec, "r", encoding="utf-8") as f:
+            exec(f.read(), namespace)
+        _KERNEL_VERSION_CACHE = str(namespace.get("__version__", "0.0.0"))
+        return _KERNEL_VERSION_CACHE
     except Exception:
         return "0.0.0"
+
+
+def _open_json_url(url: str, timeout: int = 15) -> Optional[dict]:
+    req = urlrequest.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "MarkItDownDesk",
+        },
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            charset = resp.headers.get_content_charset() or "utf-8"
+            return json.loads(resp.read().decode(charset))
+    except (OSError, ValueError, json.JSONDecodeError, urlerror.URLError):
+        return None
 
 
 def find_repo_root() -> Optional[str]:
@@ -50,11 +82,10 @@ def find_repo_root() -> Optional[str]:
 
 def check_latest_release() -> Optional[ReleaseInfo]:
     """Query GitHub API for the latest release."""
+    d = _open_json_url(GITHUB_API, timeout=15)
+    if not d:
+        return None
     try:
-        import requests
-        resp = requests.get(GITHUB_API, timeout=15)
-        resp.raise_for_status()
-        d = resp.json()
         return ReleaseInfo(
             tag_name=d["tag_name"],
             body=d.get("body", "")[:2000],
@@ -62,25 +93,25 @@ def check_latest_release() -> Optional[ReleaseInfo]:
             published_at=d.get("published_at", ""),
             zipball_url=d.get("zipball_url", ""),
         )
-    except Exception:
+    except KeyError:
         return None
 
 
 def download_zip(url: str, target_path: str, cb: Optional[Callable[[float], None]] = None) -> bool:
     """Download ZIP from URL with optional progress callback (0.0-1.0)."""
     try:
-        import requests
-        resp = requests.get(url, stream=True, timeout=30)
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        done = 0
-        with open(target_path, "wb") as f:
-            for chunk in resp.iter_content(8192):
-                if chunk:
-                    f.write(chunk)
-                    done += len(chunk)
-                    if cb and total > 0:
-                        cb(done / total)
+        req = urlrequest.Request(url, headers={"User-Agent": "MarkItDownDesk"})
+        with urlrequest.urlopen(req, timeout=30) as resp, open(target_path, "wb") as f:
+            total = int(resp.headers.get("Content-Length", "0") or 0)
+            done = 0
+            while True:
+                chunk = resp.read(8192)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if cb and total > 0:
+                    cb(done / total)
         return True
     except Exception:
         return False

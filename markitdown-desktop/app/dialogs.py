@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Dialogs: SettingsDialog."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QPushButton, QFileDialog, QDialogButtonBox, QRadioButton,
-    QCheckBox, QSlider, QSpinBox, QFormLayout, QMessageBox)
+    QCheckBox, QSpinBox, QMessageBox)
 
 
 class SettingsDialog(QDialog):
@@ -17,6 +17,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(460)
         self._build_ui()
         self._load_values()
+        QTimer.singleShot(0, self._populate_about_info)
 
     def _check_and_show_update(self):
         from app.__about__ import __version__ as _av, __app_name__ as _an
@@ -95,10 +96,10 @@ class SettingsDialog(QDialog):
         about_group = QGroupBox("关于")
         about_layout = QVBoxLayout(about_group)
         from app.__about__ import __version__ as _av, __app_name__ as _an
-        from app.updater import get_local_kernel_version as _kv
-        _k = _kv()
-        about_layout.addWidget(QLabel(f"<b>{_an}</b> v{_av}"))
-        about_layout.addWidget(QLabel(f"内核: markitdown v{_k}"))
+        self._about_app_lbl = QLabel(f"<b>{_an}</b> v{_av}")
+        self._about_kernel_lbl = QLabel("内核: 正在读取...")
+        about_layout.addWidget(self._about_app_lbl)
+        about_layout.addWidget(self._about_kernel_lbl)
         _cb = QPushButton("检查更新")
         _cb.clicked.connect(self._check_and_show_update)
         about_layout.addWidget(_cb)
@@ -141,6 +142,11 @@ class SettingsDialog(QDialog):
         if not self._settings.ask_save_each_time:
             self._path_lbl.setText(self._settings.default_save_path or "（未设置）")
         self._max_spin.setValue(self._settings.max_history)
+
+    def _populate_about_info(self):
+        from app.updater import get_local_kernel_version as _kv
+
+        self._about_kernel_lbl.setText(f"内核: markitdown v{_kv()}")
 
     def _save_values(self):
         if self._sys_rb.isChecked(): self._settings.theme_mode = "system"

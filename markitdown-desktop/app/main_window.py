@@ -19,7 +19,6 @@ from .history import HistoryManager, HistoryEntry
 from .settings import AppSettings
 from .theme import ThemeManager
 from .widgets import (UploadPanel, TopNavBar, CollapsibleCard, HistoryPanel)
-from .dialogs import SettingsDialog
 from app.__about__ import __version__, __app_name__
 
 CARD_RADIUS = 16
@@ -67,6 +66,9 @@ class MainWindow(QMainWindow):
         self._float_win = None
         self._file_list = []
         self._conversion_results = {}
+        self._queue_running = False
+        self._queue_index = 0
+        self._file_manually_selected = False
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -260,18 +262,14 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         self._navbar._import_btn.clicked.connect(self._open_file)
-        self._navbar._batch_btn.clicked.connect(lambda: self._open_file())
+        self._navbar._batch_btn.clicked.connect(self._open_file)
         self._navbar._clear_btn.clicked.connect(self._clear_content)
         self._navbar._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._navbar._export_btn.clicked.connect(self._save_file)
         self._convert_btn.clicked.connect(self._start_convert)
-        self._upload_panel.file_selected.connect(self._on_file_selected)
-        self._upload_panel.file_selected.connect(self._on_file_selected)
-
         self._upload_panel.files_added.connect(self._on_files_dropped)
         self._upload_panel.convert_requested.connect(self._start_convert)
         self._upload_panel.file_selected.connect(self._on_file_selected)
-        self._convert_btn.clicked.connect(self._start_convert)
         self._view_mode_btn.clicked.connect(self._toggle_preview_mode)
         self._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._save_btn.clicked.connect(self._save_file)
@@ -308,9 +306,9 @@ class MainWindow(QMainWindow):
             "*.msg *.epub *.zip *.rtf);;"
             "PDF (*.pdf);;Word (*.docx);;PowerPoint (*.pptx);;"
             "Excel (*.xlsx *.xls);;所有文件 (*)")
-        path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", filter_str)
-        if path:
-            self._on_files_dropped([path])
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择文件", "", filter_str)
+        if paths:
+            self._on_files_dropped(paths)
 
     def _on_files_dropped(self, paths):
         for p in paths:
@@ -323,6 +321,8 @@ class MainWindow(QMainWindow):
         self._upload_panel.clear_queue()
         for p in self._file_list:
             self._upload_panel.add_file(p)
+            if p in self._conversion_results:
+                self._upload_panel.set_item_status(self._upload_panel.queue_count() - 1, "success")
 
     def _process_next_in_queue(self):
         while self._queue_index < len(self._file_list):
@@ -341,11 +341,15 @@ class MainWindow(QMainWindow):
             self._convert_file(path)
             return
         self._queue_running = False
+        self._convert_btn.setEnabled(True)
+        self._convert_btn.setText("开始转换")
+        self._status.setText(f"批量转换完成，共 {len(self._conversion_results)} 个文件")
+
     def _start_convert(self):
         if not self._file_list:
             QMessageBox.information(self, "提示", "请先添加文件")
             return
-        if getattr(self, "_queue_running", False):
+        if self._queue_running:
             return
         self._queue_running = True
         self._queue_index = 0
@@ -362,8 +366,14 @@ class MainWindow(QMainWindow):
         self._worker.start_convert(file_path, enable_ocr=ocr_on)
 
     def _on_file_selected(self, file_path):
+        self._file_manually_selected = True
+        self._current_file = file_path
         if file_path in self._conversion_results:
-            self._render_markdown(self._conversion_results[file_path])
+            self._current_markdown = self._conversion_results[file_path]
+            if self._view_mode_btn.text() == "预览":
+                self._render_markdown(self._current_markdown)
+            else:
+                self._preview.setPlainText(self._current_markdown)
             self._status.setText(f"\u9884\u89c8: {os.path.basename(file_path)}")
         else:
             self._status.setText(f"\u26a0\ufe0f \u6587\u4ef6\u672a\u8f6c\u6362: {os.path.basename(file_path)} (\u5df2\u8f6c {len(self._conversion_results)}\u4e2a)")
@@ -381,27 +391,34 @@ class MainWindow(QMainWindow):
     @Slot(str, str)
     def _on_convert_finished(self, markdown, file_path):
         elapsed = time.time() - self._convert_start
+        self._current_file = file_path
         self._current_markdown = markdown
         self._convert_btn.setEnabled(True)
         self._convert_btn.setText("开始转换")
         self._status.setText(f"完成 ({elapsed:.1f}s)")
         self._conversion_results[file_path] = markdown
         if not getattr(self, "_file_manually_selected", False):
-            self._render_markdown(markdown)
+            if self._view_mode_btn.text() == "预览":
+                self._render_markdown(markdown)
+            else:
+                self._preview.setPlainText(markdown)
         entry = HistoryManager.make_entry(file_path, markdown)
         self.history_mgr.add(entry)
         self._refresh_history()
-        if hasattr(self, "_queue_index"):
-            self._upload_panel.set_item_status(self._queue_index, "success")
-            self._queue_index += 1
-            self._process_next_in_queue()
+        self._upload_panel.set_item_status(self._queue_index, "success")
+        self._queue_index += 1
+        self._process_next_in_queue()
 
     @Slot(str, str)
     def _on_convert_error(self, error_msg, file_path):
         self._convert_btn.setEnabled(True)
         self._convert_btn.setText("开始转换")
-        self._status.setText("转换失败")
+        self._upload_panel.set_item_status(self._queue_index, "error")
+        self._status.setText(f"转换失败: {os.path.basename(file_path)}")
         QMessageBox.warning(self, "转换失败", error_msg)
+        if self._queue_running:
+            self._queue_index += 1
+            self._process_next_in_queue()
 
     def _toggle_preview_mode(self):
         txt = self._view_mode_btn.text()
@@ -530,6 +547,10 @@ class MainWindow(QMainWindow):
         self._current_file = None
         self._current_markdown = ""
         self._file_list.clear()
+        self._conversion_results.clear()
+        self._queue_running = False
+        self._queue_index = 0
+        self._file_manually_selected = False
         self._upload_panel.clear_queue()
         self._preview.clear()
         self._status.setText("已清空")
@@ -560,6 +581,8 @@ class MainWindow(QMainWindow):
         self._status.setText("\u8bbe\u7f6e\u5df2\u4fdd\u5b58")
 
     def _open_settings(self):
+        from .dialogs import SettingsDialog
+
         dlg = SettingsDialog(self._settings, self._theme, self._float_win, self)
         dlg.exec()
         self.history_mgr._max = self._settings.max_history

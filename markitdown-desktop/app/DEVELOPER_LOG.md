@@ -1,6 +1,6 @@
 # MarkItDownDesk -- Developer Log
 
-Version: v1.0 | PySide6 (Qt 6.11) | PyInstaller
+Version: v1.1.2 | PySide6 (Qt 6.11) | PyInstaller
 
 ---
 
@@ -597,3 +597,34 @@ markitdown loads in the background.
 
 **After:** UI ready in ~505ms. Deferred markitdown import (~1s) runs
 asynchronously — cache is populated before user can open settings.
+
+
+## v1.1.2 — Update Path Slimming + Startup Cleanup (2026-07-19)
+
+**Biggest startup win fixed:** `get_local_kernel_version()` no longer imports
+the full `markitdown` package just to read a version string.
+
+**Before:**
+- First kernel-version lookup: ~3190ms
+- Side effect: `pydub` tried probing `ffmpeg`, printing a runtime warning
+- Settings / About open path paid this cost on first use
+
+**Now:**
+- `app/updater.py` reads the kernel version via `importlib.metadata.version("markitdown")`
+  with a lightweight fallback, avoiding heavy package import
+- Same lookup now returns in ~35ms in the local environment
+- No `pydub` / `ffmpeg` warning on the version-check path
+
+**Code cleanup:**
+- `dialogs.py`: About section now paints immediately and fills kernel info on the next event loop tick
+- `main_window.py`: removed duplicate signal connections, switched import dialog to multi-select,
+  lazily imports `SettingsDialog`, and keeps queue status / preview state in sync more cleanly
+- `main.py`: removed now-unneeded startup warning filter
+
+**Packaging trim:**
+- `build.spec` now excludes `requests` and its dependency chain
+  (`urllib3`, `charset_normalizer`, `idna`, `certifi`, `chardet`)
+- `app/updater.py` switched from `requests` to stdlib `urllib`
+
+**Version sync:**
+- `app/__about__.py` updated to `1.1.2` so runtime title/version matches the actual release track

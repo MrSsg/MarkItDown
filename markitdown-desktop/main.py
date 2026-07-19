@@ -2,8 +2,6 @@
 
 import sys
 import os
-import warnings
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="pydub")
 
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QAction
