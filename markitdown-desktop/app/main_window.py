@@ -1,662 +1,516 @@
 # SPDX-License-Identifier: MIT
+"""Professional two-pane desktop workspace."""
 
-import os, time, html as html_mod
+from __future__ import annotations
 
-from PySide6.QtCore import (Qt, Slot, QSize, QPropertyAnimation, QEvent,
-    QEasingCurve, Signal)
-from PySide6.QtGui import (QAction, QClipboard, QFont, QColor,
-    QPainter, QPixmap, QIcon, QDragEnterEvent, QDropEvent,
-    QDragLeaveEvent, QDragMoveEvent)
+import html
+import os
+import time
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Slot, QTimer
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
-    QTextBrowser, QListWidget, QStackedWidget, QListWidgetItem, QLabel, QPushButton,
-    QStatusBar, QFileDialog, QMessageBox, QDialog, QDialogButtonBox,
-    QRadioButton, QCheckBox, QSlider, QSpinBox, QComboBox, QFormLayout,
-    QGroupBox, QSizePolicy, QApplication, QStyle, QGraphicsDropShadowEffect)
+    QApplication, QCheckBox, QDialog, QDockWidget, QFileDialog, QFrame,
+    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton,
+    QSplitter, QTextBrowser, QVBoxLayout, QWidget,
+)
 
+from app.__about__ import __app_name__, __version__
+from .history import HistoryManager
+from .job_widgets import JobList
+from .jobs import JobController, JobFailure, JobItem, ResourceLimits, SessionStore
+from .ocr import OcrComponentManager
+from .theme_toggle import ThemeToggleButton
+from .widgets import HistoryPanel
 from .worker import ConvertWorker
-from .history import HistoryManager, HistoryEntry
-from .settings import AppSettings
-from .theme import ThemeManager
-from .widgets import (UploadPanel, TopNavBar, CollapsibleCard, HistoryPanel)
-from app.__about__ import __version__, __app_name__
-
-CARD_RADIUS = 16
 
 
+SUPPORTED_FILTER = (
+    "所有支持的文件 (*.pdf *.docx *.pptx *.xlsx *.xls *.html *.htm *.txt *.csv "
+    "*.json *.xml *.md *.jpg *.jpeg *.png *.wav *.mp3 *.m4a *.msg *.epub *.zip *.rtf);;"
+    "所有文件 (*)"
+)
 
-
-
-
-class ResettableSplitter(QSplitter):
-    """QSplitter with double-click reset and hover cursor."""
-    def __init__(self, orientation, default_sizes=None, parent=None):
-        super().__init__(orientation, parent)
-        self._default_sizes = default_sizes
-        self.setHandleWidth(4)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        for i in range(self.count()):
-            self.handle(i).installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        for i in range(self.count()):
-            if self.handle(i) is obj:
-                if event.type() == QEvent.Type.Enter:
-                    obj.setCursor(Qt.SplitHCursor if self.orientation() == Qt.Horizontal else Qt.SplitVCursor)
-                elif event.type() == QEvent.Type.Leave:
-                    obj.setCursor(Qt.ArrowCursor)
-                elif event.type() == QEvent.Type.MouseButtonDblClick:
-                    if self._default_sizes:
-                        self.setSizes(self._default_sizes)
-                    return True
-                break
-        return super().eventFilter(obj, event)
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings, theme_mgr, history_mgr):
+    def __init__(self, settings, theme_mgr, history_mgr) -> None:
         super().__init__()
+        self.setAcceptDrops(True)
         self._settings = settings
         self._theme = theme_mgr
         self.history_mgr = history_mgr
-        self._current_file = None
+        SessionStore.cleanup_stale()
+        self._jobs = JobController(self._resource_limits())
+        self._worker = ConvertWorker(self)
+        self._ocr_manager = OcrComponentManager()
+        self._current_file: str | None = None
         self._current_markdown = ""
-        self._convert_start = 0.0
         self._float_win = None
-        self._file_list = []
-        self._conversion_results = {}
-        self._queue_running = False
-        self._queue_index = 0
-        self._file_manually_selected = False
+        self._view_source = False
+        self._timeout = QTimer(self)
+        self._timeout.setSingleShot(True)
+        self._timeout.timeout.connect(self._on_current_timeout)
+        self._build_ui()
+        self._connect_signals()
+        self._refresh_ocr_status()
+        self._refresh_history()
+        self.setWindowTitle(f"{__app_name__} v{__version__}")
+        geometry = self._settings.window_geometry
+        if geometry:
+            self.restoreGeometry(geometry)
+        else:
+            self.resize(1280, 800)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        # Sidebar + content layout
+    def _resource_limits(self) -> ResourceLimits:
+        return ResourceLimits(
+            max_file_bytes=self._settings.max_file_mib * 1024 * 1024,
+            max_batch_items=self._settings.max_batch_items,
+            max_pdf_pages=self._settings.max_pdf_pages,
+            max_zip_uncompressed_bytes=self._settings.max_zip_mib * 1024 * 1024,
+        )
 
-        root = QVBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
+    def _build_ui(self) -> None:
+        root = QWidget(self)
+        self.setCentralWidget(root)
+        layout = QVBoxLayout(root)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
 
-        # Top NavBar
+        header = QHBoxLayout()
+        brand = QLabel("M")
+        brand.setObjectName("brandMark")
+        brand.setAlignment(Qt.AlignCenter)
+        brand.setFixedSize(36, 36)
+        header.addWidget(brand)
+        title = QLabel("MarkItDownDesk")
+        title.setObjectName("workspaceTitle")
+        header.addWidget(title)
+        subtitle = QLabel("批量转换工作台")
+        subtitle.setObjectName("workspaceSubtitle")
+        header.addWidget(subtitle)
+        header.addStretch()
+        self._import_btn = QPushButton("导入文件")
+        self._import_btn.setObjectName("primaryAction")
+        self._history_btn = QPushButton("历史")
+        self._settings_btn = QPushButton("设置")
+        self._theme_btn = ThemeToggleButton()
+        self._theme_btn.set_theme(self._theme.current_theme, animate=False)
+        for button in (self._history_btn, self._settings_btn, self._theme_btn):
+            button.setObjectName(button.objectName() or "secondaryBtn")
+            header.addWidget(button)
+        header.addWidget(self._import_btn)
+        layout.addLayout(header)
 
-        # Content area
-        cw = QWidget()
-        cw.setContentsMargins(16, 16, 16, 0)
-        cl = QVBoxLayout(cw)
-        cl.setSpacing(12)
-
-        # Three equal-width cards in a horizontal splitter
-        self._inner_splitter = ResettableSplitter(Qt.Horizontal, default_sizes=[286, 143, 571])
-
-        # Card 1: Upload
-        self._upload_card = CollapsibleCard("上传文件")
-        self._upload_panel = UploadPanel()
-        self._upload_card.content_layout().addWidget(self._upload_panel)
-        self._upload_card.setMinimumWidth(220)
-        self._inner_splitter.addWidget(self._upload_card)
-
-        # Card 2: Options
-        self._options_card = CollapsibleCard("转换选项")
-        ol = self._options_card.content_layout()
-        self._render_cb = QCheckBox("渲染 Markdown 预览")
-        self._render_cb.setChecked(True); ol.addWidget(self._render_cb)
-        self._image_cb = QCheckBox("嵌入图片")
-        self._image_cb.setChecked(True); ol.addWidget(self._image_cb)
-        self._ocr_cb = QCheckBox("启用 OCR")
-        ol.addWidget(self._ocr_cb)
-        ol.addStretch()
-        self._convert_btn = QPushButton("开始转换")
-        self._convert_btn.setObjectName("primaryAction")
-        self._convert_btn.setFixedHeight(44)
-        ol.addWidget(self._convert_btn)
-        self._options_card.setMinimumWidth(220)
-        self._inner_splitter.addWidget(self._options_card)
-
-        # Card 3: Preview
-        self._preview_card = CollapsibleCard("Markdown 预览")
-        pl = self._preview_card.content_layout()
-        ptb = QHBoxLayout()
-        self._view_mode_btn = QPushButton("预览")
-        self._view_mode_btn.setObjectName("secondaryBtn")
-        self._view_mode_btn.setFixedHeight(30)
-        ptb.addWidget(self._view_mode_btn)
-        self._copy_btn = QPushButton("📋 复制")
-        self._copy_btn.setObjectName("secondaryBtn")
-        self._copy_btn.setFixedHeight(30)
-        ptb.addWidget(self._copy_btn)
-        self._save_btn = QPushButton("导出")
-        self._save_btn.setObjectName("secondaryBtn")
-        self._save_btn.setFixedHeight(30)
-        self._export_all_btn = QPushButton("\u5bfc\u51fa\u5168\u90e8")
-        self._export_all_btn.setObjectName("secondaryBtn")
-        self._export_all_btn.setFixedHeight(30)
-        ptb.addWidget(self._save_btn)
-        ptb.addWidget(self._export_all_btn); ptb.addStretch()
-        pl.addLayout(ptb)
-        self._preview = QTextBrowser()
-        self._preview.setOpenExternalLinks(True)
-        pl.addWidget(self._preview)
-        self._preview_card.setMinimumWidth(220)
-        self._inner_splitter.addWidget(self._preview_card)
-
-        # Wrap inner splitter + history into outer vertical splitter
-        self._outer_splitter = ResettableSplitter(Qt.Vertical, default_sizes=[780, 220])
-        top_container = QWidget()
-        top_layout = QVBoxLayout(top_container)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.addWidget(self._inner_splitter)
-
-        self._hist_panel = HistoryPanel()
-        self._hist_panel.setMinimumHeight(180)
-
-        self._outer_splitter.addWidget(top_container)
-        self._outer_splitter.addWidget(self._hist_panel)
-
-        # Restore saved sizes
-        saved_outer = self._settings.window_splitter_outer
-        saved_inner = self._settings.window_splitter_inner
-        if saved_outer:
-            self._outer_splitter.restoreState(saved_outer)
-        if saved_inner:
-            self._inner_splitter.restoreState(saved_inner)
-
-        # Create QStackedWidget for page switching
-        self._pages = QStackedWidget()
-        self._pages.setContentsMargins(16, 16, 16, 0)
-
-        # Page 0: Batch convert (existing splitter content)
-        batch_page = QWidget()
-        batch_page.setContentsMargins(0, 0, 0, 16)
-        batch_layout = QVBoxLayout(batch_page)
-        batch_layout.setContentsMargins(0, 0, 0, 0)
-        batch_layout.addWidget(self._outer_splitter)
-        self._pages.addWidget(batch_page)
-
-        # Page 1: History
-        hist_page = QWidget()
-        hist_layout = QVBoxLayout(hist_page)
-        hist_layout.setContentsMargins(0, 0, 0, 0)
-        self._history_page_list = QListWidget()
-        hist_layout.addWidget(QLabel("\u8f6c\u6362\u65e5\u5fd7"))
-        hist_layout.addWidget(self._history_page_list)
-        self._pages.addWidget(hist_page)
-
-        # Page 2: Settings
-        settings_page = QWidget()
-        self._settings_page = settings_page
-        sl = QVBoxLayout(settings_page)
-        sl.setContentsMargins(32, 24, 32, 24)
-        sl.setSpacing(16)
-
-        # Save path group
-        g1 = QGroupBox("\u4fdd\u5b58\u8def\u5f84")
-        g1l = QVBoxLayout(g1)
-        self._path_lbl = QLabel(self._settings.default_save_path or "\uff08\u672a\u8bbe\u7f6e\uff09")
-        self._path_lbl.setWordWrap(True)
-        br = QHBoxLayout()
-        browse_btn = QPushButton("\u6d4f\u89c8...")
-        browse_btn.clicked.connect(self._browse_save_path)
-        self._ask_cb = QCheckBox("\u6bcf\u6b21\u8be2\u95ee\u4fdd\u5b58\u8def\u5f84")
-        self._ask_cb.toggled.connect(lambda c: browse_btn.setEnabled(not c))
-        br.addWidget(browse_btn); br.addWidget(self._ask_cb); br.addStretch()
-        g1l.addWidget(self._path_lbl); g1l.addLayout(br)
-        sl.addWidget(g1)
-
-        # Theme group
-        g2 = QGroupBox("\u4e3b\u9898")
-        g2l = QVBoxLayout(g2)
-        self._sys_rb = QRadioButton("\u8ddf\u968f\u7cfb\u7edf")
-        self._dark_rb = QRadioButton("\u6697\u8272\u6a21\u5f0f")
-        self._light_rb = QRadioButton("\u4eae\u8272\u6a21\u5f0f")
-        self._sys_rb.toggled.connect(self._on_settings_theme_toggled)
-        self._dark_rb.toggled.connect(self._on_settings_theme_toggled)
-        self._light_rb.toggled.connect(self._on_settings_theme_toggled)
-        g2l.addWidget(self._sys_rb); g2l.addWidget(self._dark_rb); g2l.addWidget(self._light_rb)
-        sl.addWidget(g2)
-
-        # History group
-        g3 = QGroupBox("\u5386\u53f2\u8bb0\u5f55")
-        g3l = QVBoxLayout(g3)
-        hr = QHBoxLayout()
-        hr.addWidget(QLabel("\u6700\u5927\u4fdd\u7559\u6761\u6570:"))
-        self._max_spin = QSpinBox()
-        self._max_spin.setRange(10, 200)
-        hr.addWidget(self._max_spin); hr.addStretch()
-        g3l.addLayout(hr)
-        clear_btn = QPushButton("\u6e05\u7a7a\u5386\u53f2\u8bb0\u5f55")
-        clear_btn.clicked.connect(self._clear_history)
-        g3l.addWidget(clear_btn)
-        sl.addWidget(g3)
-
-        # Load values + save button
-        self._load_settings_values()
-        save_btn = QPushButton("\u4fdd\u5b58\u8bbe\u7f6e")
-        save_btn.clicked.connect(self._save_settings_values)
-        sl.addWidget(save_btn)
-        sl.addStretch()
-        self._pages.addWidget(settings_page)
-
-        self._navbar = TopNavBar()
-        self._navbar.nav_changed.connect(self._on_nav_changed)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setObjectName("workspaceSplitter")
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self._build_queue_pane())
+        splitter.addWidget(self._build_detail_pane())
+        splitter.setSizes([390, 890])
+        layout.addWidget(splitter, 1)
 
         self._status = QLabel("就绪")
-        root.addWidget(self._navbar)
-        root.addWidget(self._pages, 1)
-        root.addWidget(self._status)
-        
-        # Status Bar
-        # Signals
-        self._connect_signals()
+        self._status.setObjectName("statusLine")
+        layout.addWidget(self._status)
 
-        # Worker
-        self._worker = ConvertWorker(self)
-        self._worker.finished.connect(self._on_convert_finished)
-        self._worker.error.connect(self._on_convert_error)
-        self._worker.progress.connect(self._on_convert_progress)
-        self._worker.started.connect(self._on_convert_started)
-        self.setWindowTitle(f"{__app_name__} v{__version__}")
-        geo = self._settings.window_geometry
-        if geo: self.restoreGeometry(geo)
-        else: self.resize(1280, 800)
-        self._refresh_history()
+        self._history_dock = QDockWidget("转换历史", self)
+        self._history_dock.setObjectName("historyDrawer")
+        self._hist_panel = HistoryPanel()
+        self._history_dock.setWidget(self._hist_panel)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self._history_dock)
+        self._history_dock.hide()
 
-    def _connect_signals(self):
-        self._navbar._import_btn.clicked.connect(self._open_file)
-        self._navbar._batch_btn.clicked.connect(self._open_file)
-        self._navbar._clear_btn.clicked.connect(self._clear_content)
-        self._navbar._copy_btn.clicked.connect(self._copy_to_clipboard)
-        self._navbar._export_btn.clicked.connect(self._save_file)
-        self._convert_btn.clicked.connect(self._start_convert)
-        self._upload_panel.files_added.connect(self._on_files_dropped)
-        self._upload_panel.convert_requested.connect(self._start_convert)
-        self._upload_panel.file_selected.connect(self._on_file_selected)
+    def _build_queue_pane(self) -> QWidget:
+        pane = QFrame()
+        pane.setObjectName("queuePane")
+        layout = QVBoxLayout(pane)
+        layout.setContentsMargins(16, 16, 16, 16)
+        title = QLabel("任务队列")
+        title.setObjectName("paneTitle")
+        layout.addWidget(title)
+        hint = QLabel("拖入文件或点击导入。超限项目会在开始前标记失败。")
+        hint.setObjectName("mutedText")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self._drop_hint = QPushButton("＋ 添加文件")
+        self._drop_hint.setObjectName("dropZone")
+        self._drop_hint.setMinimumHeight(84)
+        layout.addWidget(self._drop_hint)
+        self._job_list = JobList()
+        self._job_list.setObjectName("jobList")
+        layout.addWidget(self._job_list, 1)
+        controls = QHBoxLayout()
+        self._start_btn = QPushButton("开始转换")
+        self._start_btn.setObjectName("primaryAction")
+        self._cancel_btn = QPushButton("取消后续")
+        self._cancel_btn.setObjectName("secondaryBtn")
+        self._cancel_btn.setEnabled(False)
+        controls.addWidget(self._start_btn)
+        controls.addWidget(self._cancel_btn)
+        layout.addLayout(controls)
+        self._retry_btn = QPushButton("重试失败项")
+        self._retry_btn.setObjectName("secondaryBtn")
+        self._retry_btn.setEnabled(False)
+        layout.addWidget(self._retry_btn)
+        return pane
+
+    def _build_detail_pane(self) -> QWidget:
+        pane = QFrame()
+        pane.setObjectName("detailPane")
+        layout = QVBoxLayout(pane)
+        layout.setContentsMargins(20, 16, 20, 16)
+        self._detail_title = QLabel("选择一个任务")
+        self._detail_title.setObjectName("paneTitle")
+        layout.addWidget(self._detail_title)
+        self._detail_meta = QLabel("尚未开始转换")
+        self._detail_meta.setObjectName("mutedText")
+        self._detail_meta.setWordWrap(True)
+        layout.addWidget(self._detail_meta)
+        options = QHBoxLayout()
+        self._ocr_cb = QCheckBox("启用离线 OCR")
+        self._ocr_status = QLabel()
+        self._ocr_status.setObjectName("mutedText")
+        self._ocr_install_btn = QPushButton("管理 OCR 组件")
+        self._ocr_install_btn.setObjectName("secondaryBtn")
+        options.addWidget(self._ocr_cb)
+        options.addWidget(self._ocr_status, 1)
+        options.addWidget(self._ocr_install_btn)
+        layout.addLayout(options)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        layout.addWidget(self._progress)
+        toolbar = QHBoxLayout()
+        self._view_mode_btn = QPushButton("查看源码")
+        self._copy_btn = QPushButton("复制")
+        self._save_btn = QPushButton("导出当前")
+        self._export_all_btn = QPushButton("导出全部")
+        self._failure_btn = QPushButton("失败日志")
+        for button in (self._view_mode_btn, self._copy_btn, self._save_btn, self._export_all_btn, self._failure_btn):
+            button.setObjectName("secondaryBtn")
+            toolbar.addWidget(button)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        self._preview = QTextBrowser()
+        self._preview.setOpenExternalLinks(True)
+        self._preview.setObjectName("markdownPreview")
+        layout.addWidget(self._preview, 1)
+        return pane
+
+    def _connect_signals(self) -> None:
+        self._import_btn.clicked.connect(self._open_file)
+        self._drop_hint.clicked.connect(self._open_file)
+        self._start_btn.clicked.connect(self._start_convert)
+        self._cancel_btn.clicked.connect(self._cancel_queue)
+        self._retry_btn.clicked.connect(self._retry_failed)
+        self._failure_btn.clicked.connect(self._show_failure_report)
+        self._history_btn.clicked.connect(self._history_dock.show)
+        self._settings_btn.clicked.connect(self._open_settings)
+        self._theme_btn.clicked.connect(self._theme.toggle)
+        self._ocr_cb.toggled.connect(self._on_ocr_toggled)
+        self._ocr_install_btn.clicked.connect(self._open_ocr_install)
         self._view_mode_btn.clicked.connect(self._toggle_preview_mode)
         self._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._save_btn.clicked.connect(self._save_file)
         self._export_all_btn.clicked.connect(lambda: self._save_file(batch=True))
         self._hist_panel.clear_btn.clicked.connect(self._clear_history)
         self._hist_panel.list_widget.itemClicked.connect(self._on_history_clicked)
-        self._navbar._theme_btn.clicked.connect(self._theme.toggle)
+        self._job_list.item_selected.connect(self._on_job_selected)
+        self._worker.finished.connect(self._on_convert_finished)
+        self._worker.error.connect(self._on_convert_error)
+        self._worker.progress.connect(self._on_convert_progress)
+        self._worker.started.connect(self._on_convert_started)
+        self._worker.ocr_unavailable.connect(self._on_ocr_unavailable)
         self._theme.theme_changed.connect(self._on_theme_changed)
 
-    def _on_settings_theme_toggled(self, checked):
-        """Apply theme immediately when a radio button is clicked."""
-        if not checked:
-            return
-        if self._sys_rb.isChecked():
-            self._settings.theme_mode = "system"
-            self._theme.set_mode("system")
-        elif self._dark_rb.isChecked():
-            self._settings.theme_mode = "dark"
-            self._theme.set_mode("dark")
+    def _refresh_ocr_status(self) -> None:
+        info = self._ocr_manager.status()
+        if info.installed:
+            self._ocr_status.setText(f"已安装 v{info.version}，本机执行")
+            self._ocr_install_btn.setText("管理 OCR 组件")
         else:
-            self._settings.theme_mode = "light"
-            self._theme.set_mode("light")
-        self._settings.sync()
+            self._ocr_status.setText("未安装；图片与扫描 PDF 可用")
+            self._ocr_install_btn.setText("安装 OCR 组件")
 
-    def _on_theme_changed(self, theme):
-        self._navbar.update_theme_icon(theme == "dark")
-        if self._current_markdown:
+    def _on_ocr_toggled(self, checked: bool) -> None:
+        if checked and not self._ocr_manager.status().installed:
+            self._ocr_cb.blockSignals(True)
+            self._ocr_cb.setChecked(False)
+            self._ocr_cb.blockSignals(False)
+            self._open_ocr_install()
+
+    def _open_ocr_install(self) -> None:
+        from .dialogs import OcrInstallDialog
+        OcrInstallDialog(self._ocr_manager, self).exec()
+        self._refresh_ocr_status()
+
+    def _on_ocr_unavailable(self, message: str) -> None:
+        self._ocr_cb.setChecked(False)
+        self._status.setText(f"OCR 未启用：{message}")
+
+    def _on_theme_changed(self, is_dark) -> None:
+        self._theme_btn.set_theme(is_dark)
+        if self._current_markdown and not self._view_source:
             self._render_markdown(self._current_markdown)
 
-    def _open_file(self):
-        filter_str = ("所有支持的文件 (*.pdf *.docx *.pptx *.xlsx *.xls "
-            "*.html *.htm *.txt *.csv *.json *.xml *.md "
-            "*.jpg *.jpeg *.png *.wav *.mp3 *.m4a "
-            "*.msg *.epub *.zip *.rtf);;"
-            "PDF (*.pdf);;Word (*.docx);;PowerPoint (*.pptx);;"
-            "Excel (*.xlsx *.xls);;所有文件 (*)")
-        paths, _ = QFileDialog.getOpenFileNames(self, "选择文件", "", filter_str)
+    def _open_file(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择待转换文件", "", SUPPORTED_FILTER)
         if paths:
             self._on_files_dropped(paths)
 
-    def _on_files_dropped(self, paths):
-        for p in paths:
-            if os.path.isfile(p) and p not in self._file_list:
-                self._file_list.append(p)
-        self._refresh_file_list()
-        self._status.setText(f"已加载 {len(self._file_list)} 个文件")
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
 
-    def _refresh_file_list(self):
-        self._upload_panel.clear_queue()
-        for p in self._file_list:
-            self._upload_panel.add_file(p)
-            if p in self._conversion_results:
-                self._upload_panel.set_item_status(self._upload_panel.queue_count() - 1, "success")
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self._on_files_dropped(paths)
+            event.acceptProposedAction()
 
-    def _process_next_in_queue(self):
-        while self._queue_index < len(self._file_list):
-            path = self._file_list[self._queue_index]
-            if not os.path.isfile(path):
-                self._queue_index += 1
-                continue
-            if path in self._conversion_results:
-                if hasattr(self, "_upload_panel"):
-                    self._upload_panel.set_item_status(self._queue_index, "success")
-                self._queue_index += 1
-                continue
-            if hasattr(self, "_upload_panel"):
-                self._upload_panel.set_item_status(self._queue_index, "converting")
-            self._status.setText(f"\u8f6c\u6362\u4e2d ({self._queue_index+1}/{len(self._file_list)}): {os.path.basename(path)}")
-            self._convert_file(path)
+    def _on_files_dropped(self, paths: list[str]) -> None:
+        if self._jobs.state.value in ("Running", "Cancelling", "TimedOutWaiting"):
+            self._status.setText("当前批次正在运行，完成后再创建新任务")
             return
-        self._queue_running = False
-        self._convert_btn.setEnabled(True)
-        self._convert_btn.setText("开始转换")
-        self._status.setText(f"批量转换完成，共 {len(self._conversion_results)} 个文件")
+        self._jobs = JobController(self._resource_limits())
+        self._jobs.enqueue(paths)
+        self._refresh_jobs()
+        rejected = len(self._jobs.failures)
+        self._status.setText(f"已创建 {len(self._jobs.items)} 个任务" + (f"，{rejected} 个预检失败" if rejected else ""))
 
-    def _start_convert(self):
-        if not self._file_list:
-            QMessageBox.information(self, "提示", "请先添加文件")
+    def _refresh_jobs(self) -> None:
+        self._job_list.refresh(self._jobs.items)
+        self._retry_btn.setEnabled(bool(self._jobs.failures) and self._jobs.state.value not in ("Running", "Cancelling", "TimedOutWaiting"))
+        self._failure_btn.setEnabled(bool(self._jobs.failures))
+        self._start_btn.setEnabled(bool(self._jobs.items) and self._jobs.state.value in ("Idle", "Completed"))
+        self._cancel_btn.setEnabled(self._jobs.state.value in ("Running", "TimedOutWaiting"))
+
+    def _start_convert(self) -> None:
+        item = self._jobs.start()
+        self._refresh_jobs()
+        if item is None:
+            self._finish_queue()
             return
-        if self._queue_running:
+        self._start_item(item)
+
+    def _start_item(self, item: JobItem) -> None:
+        self._current_file = item.file_path
+        self._detail_title.setText(item.file_name)
+        self._detail_meta.setText("正在转换…")
+        self._progress.setRange(0, 0)
+        if not self._worker.start_convert(item.file_path, self._ocr_cb.isChecked(), self._ocr_manager):
+            self._jobs.fail_current(JobFailure("scheduler", "WORKER_BUSY", "转换器仍在运行"))
+            self._start_convert()
             return
-        self._queue_running = True
-        self._queue_index = 0
-        self._file_manually_selected = False
-        self._status.setText(f"\u5f00\u59cb\u6279\u91cf\u8f6c\u6362 ({len(self._file_list)} \u4e2a\u6587\u4ef6)...")
-        self._process_next_in_queue()
+        timeout_ms = 5 * 60 * 1000 if self._ocr_cb.isChecked() and PathSuffix.is_ocr_file(item.file_path) else 10 * 60 * 1000
+        self._timeout.start(timeout_ms)
+        self._refresh_jobs()
 
-    def _convert_file(self, file_path):
-        self._current_file = file_path
-        self._convert_start = time.time()
-        ocr_on = self._ocr_cb.isChecked()
-        if ocr_on:
-            self._status.setText(f"正在转换 (OCR已开启): {os.path.basename(file_path)}...")
-        self._worker.start_convert(file_path, enable_ocr=ocr_on)
+    def _on_current_timeout(self) -> None:
+        current = self._jobs.current
+        if not current:
+            return
+        if self._ocr_cb.isChecked() and PathSuffix.is_ocr_file(current.file_path):
+            self._worker.stop_owned_ocr_process()
+            self._status.setText("OCR 超时，正在停止 OCR 子进程")
+            return
+        self._jobs.mark_timeout_waiting()
+        self._status.setText("转换超过 10 分钟，等待当前线程自然结束")
+        self._refresh_jobs()
 
-    def _on_file_selected(self, file_path):
-        self._file_manually_selected = True
-        self._current_file = file_path
-        if file_path in self._conversion_results:
-            self._current_markdown = self._conversion_results[file_path]
-            if self._view_mode_btn.text() == "预览":
-                self._render_markdown(self._current_markdown)
-            else:
-                self._preview.setPlainText(self._current_markdown)
-            self._status.setText(f"\u9884\u89c8: {os.path.basename(file_path)}")
-        else:
-            self._status.setText(f"\u26a0\ufe0f \u6587\u4ef6\u672a\u8f6c\u6362: {os.path.basename(file_path)} (\u5df2\u8f6c {len(self._conversion_results)}\u4e2a)")
+    def _cancel_queue(self) -> None:
+        self._jobs.request_cancel()
+        self._status.setText("已取消后续任务；当前任务会安全完成")
+        self._refresh_jobs()
 
     @Slot(str, str)
-    def _on_convert_started(self, file_path, file_name):
-        self._status.setText(f"正在转换: {os.path.basename(file_path)}...")
-        self._convert_btn.setEnabled(False)
-        self._convert_btn.setText("转换中...")
+    def _on_convert_finished(self, markdown: str, file_path: str) -> None:
+        self._timeout.stop()
+        current = self._jobs.current
+        next_item = self._jobs.complete_current(markdown)
+        if current and current.state == "success":
+            self._current_markdown = markdown
+            self._show_markdown(current, markdown)
+            self.history_mgr.add(HistoryManager.make_entry(file_path, markdown))
+            self._refresh_history()
+        self._refresh_jobs()
+        if next_item:
+            self._start_item(next_item)
+        else:
+            self._finish_queue()
+
+    @Slot(str, str)
+    def _on_convert_error(self, error: str, file_path: str) -> None:
+        self._timeout.stop()
+        next_item = self._jobs.fail_current(JobFailure("conversion", "CONVERSION_FAILED", "转换失败", error))
+        self._status.setText(f"转换失败：{os.path.basename(file_path)}")
+        self._refresh_jobs()
+        if next_item:
+            self._start_item(next_item)
+        else:
+            self._finish_queue()
+
+    @Slot(str, str)
+    def _on_convert_started(self, _path: str, name: str) -> None:
+        self._status.setText(f"正在转换：{name}")
 
     @Slot(str)
-    def _on_convert_progress(self, msg):
-        self._status.setText(msg)
+    def _on_convert_progress(self, message: str) -> None:
+        self._status.setText(message)
+        self._progress.setRange(0, 0)
 
-    @Slot(str, str)
-    def _on_convert_finished(self, markdown, file_path):
-        elapsed = time.time() - self._convert_start
-        self._current_file = file_path
-        self._current_markdown = markdown
-        self._convert_btn.setEnabled(True)
-        self._convert_btn.setText("开始转换")
-        self._status.setText(f"完成 ({elapsed:.1f}s)")
-        self._conversion_results[file_path] = markdown
-        if not getattr(self, "_file_manually_selected", False):
-            if self._view_mode_btn.text() == "预览":
-                self._render_markdown(markdown)
-            else:
-                self._preview.setPlainText(markdown)
-        entry = HistoryManager.make_entry(file_path, markdown)
-        self.history_mgr.add(entry)
-        self._refresh_history()
-        self._upload_panel.set_item_status(self._queue_index, "success")
-        self._queue_index += 1
-        self._process_next_in_queue()
-
-    @Slot(str, str)
-    def _on_convert_error(self, error_msg, file_path):
-        self._convert_btn.setEnabled(True)
-        self._convert_btn.setText("开始转换")
-        self._upload_panel.set_item_status(self._queue_index, "error")
-        self._status.setText(f"转换失败: {os.path.basename(file_path)}")
-        QMessageBox.warning(self, "转换失败", error_msg)
-        if self._queue_running:
-            self._queue_index += 1
-            self._process_next_in_queue()
-
-    def _toggle_preview_mode(self):
-        txt = self._view_mode_btn.text()
-        if txt == "预览":
-            self._view_mode_btn.setText("源码")
-            if self._current_markdown:
-                self._preview.setPlainText(self._current_markdown)
+    def _finish_queue(self) -> None:
+        self._progress.setRange(0, 100)
+        self._progress.setValue(100 if self._jobs.completed_count else 0)
+        if self._jobs.failures:
+            self._status.setText(f"批次完成：成功 {self._jobs.completed_count}，失败 {len(self._jobs.failures)}")
         else:
-            self._view_mode_btn.setText("预览")
-            if self._current_markdown:
-                self._render_markdown(self._current_markdown)
+            self._status.setText(f"批次完成：成功 {self._jobs.completed_count}")
+        self._refresh_jobs()
 
-    def _render_markdown(self, text):
+    def _retry_failed(self) -> None:
+        items = self._jobs.retry_failures()
+        self._refresh_jobs()
+        if items:
+            self._start_convert()
+
+    def _show_failure_report(self) -> None:
+        entries = []
+        for item in self._jobs.failures:
+            failure = item.failure
+            if failure:
+                entries.append(f"{item.file_name}\n[{failure.code}] {failure.message}\n{failure.detail}".strip())
+        if not entries:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("批量转换失败日志")
+        dialog.setIcon(QMessageBox.Warning)
+        dialog.setText(f"共 {len(entries)} 个任务失败")
+        dialog.setDetailedText("\n\n".join(entries))
+        dialog.exec()
+
+    def _on_job_selected(self, path: str) -> None:
+        item = next((value for value in self._jobs.items if value.file_path == path), None)
+        if not item:
+            return
+        self._current_file = path
+        self._detail_title.setText(item.file_name)
+        if item.result_path:
+            self._current_markdown = self._jobs.store.read(item.result_path)
+            self._show_markdown(item, self._current_markdown)
+        elif item.failure:
+            self._detail_meta.setText(f"[{item.failure.code}] {item.failure.message}")
+            self._preview.setPlainText(item.failure.detail or item.failure.message)
+        else:
+            self._detail_meta.setText("等待转换")
+            self._preview.clear()
+
+    def _show_markdown(self, item: JobItem, markdown: str) -> None:
+        self._detail_meta.setText(f"已转换，结果仅在本次会话中缓存：{item.result_path.name if item.result_path else ''}")
+        if self._view_source:
+            self._preview.setPlainText(markdown)
+        else:
+            self._render_markdown(markdown)
+
+    def _toggle_preview_mode(self) -> None:
+        self._view_source = not self._view_source
+        self._view_mode_btn.setText("查看预览" if self._view_source else "查看源码")
+        if self._current_markdown:
+            self._on_job_selected(self._current_file or "")
+
+    def _render_markdown(self, text: str) -> None:
         try:
-            import markdown as md_lib
-            from pygments.formatters import HtmlFormatter
-            extensions = ["fenced_code", "codehilite", "tables", "toc", "nl2br"]
-            ext_configs = {"codehilite": {"css_class": "highlight", "use_pygments": True}}
-            body_html = md_lib.markdown(text, extensions=extensions, extension_configs=ext_configs)
-            pygments_css = HtmlFormatter().get_style_defs(".highlight")
+            import markdown as markdown_lib
+            body = markdown_lib.markdown(text, extensions=["fenced_code", "tables", "nl2br"])
         except ImportError:
-            body_html = "<pre>" + html_mod.escape(text) + "</pre>"
-            pygments_css = ""
+            body = f"<pre>{html.escape(text)}</pre>"
+        colors = self._theme.colors
+        self._preview.setHtml(
+            f"<style>body{{background:{colors.bg};color:{colors.primary_text};font:14px 'Segoe UI';line-height:1.6}}"
+            f"pre,code{{background:{colors.card_hover};border:1px solid {colors.border};padding:8px}}"
+            f"table{{border-collapse:collapse}}td,th{{border:1px solid {colors.border};padding:6px}}a{{color:#407BFF}}</style>{body}"
+        )
 
-        bg = self._theme.bg_color()
-        fg = self._theme.text_color()
-        border = self._theme.border_color()
-        accent = self._theme.accent_color()
-
-        full_html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>
-  {pygments_css}
-  body {{
-    background: {bg};
-    color: {fg};
-    font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
-    font-size: 14px;
-    line-height: 1.6;
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 10px 20px;
-  }}
-  h1, h2, h3, h4, h5, h6 {{ color: {fg}; margin-top: 20px; }}
-  h1 {{ border-bottom: 1px solid {border}; padding-bottom: 6px; font-size: 22px; }}
-  h2 {{ font-size: 18px; }}
-  code {{
-    background: {accent}20;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.9em;
-    font-family: "Consolas", "Courier New", monospace;
-  }}
-  pre {{
-    background: {accent}08;
-    border: 1px solid {border};
-    border-radius: 8px;
-    padding: 14px;
-    overflow-x: auto;
-  }}
-  pre code {{ background: none; padding: 0; }}
-  table {{ border-collapse: collapse; width: 100%; margin: 12px 0; }}
-  th, td {{ border: 1px solid {border}; padding: 8px 12px; text-align: left; }}
-  th {{ background: {accent}10; }}
-  blockquote {{
-    border-left: 4px solid {accent};
-    margin: 12px 0;
-    padding: 6px 16px;
-    background: {accent}08;
-  }}
-  img {{ max-width: 100%; }}
-  a {{ color: {accent}; }}
-</style></head><body>{body_html}</body></html>"""
-        self._preview.setHtml(full_html)
-
-    def _save_file(self, batch=False):
+    def _save_file(self, batch: bool = False) -> None:
         if batch:
-            if not self._conversion_results:
-                QMessageBox.information(self, "\u63d0\u793a", "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u6587\u4ef6")
+            available = [item for item in self._jobs.items if item.result_path]
+            if not available:
                 return
-            folder = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u5bfc\u51fa\u76ee\u6807\u6587\u4ef6\u5939")
+            folder = QFileDialog.getExistingDirectory(self, "选择导出文件夹")
             if not folder:
                 return
             success = 0
-            for fp, md in self._conversion_results.items():
-                name = os.path.splitext(os.path.basename(fp))[0] + ".md"
-                out = os.path.join(folder, name)
+            for item in available:
+                target = os.path.join(folder, os.path.splitext(item.file_name)[0] + ".md")
                 try:
-                    with open(out, "w", encoding="utf-8") as f:
-                        f.write(md)
+                    PathLike.write(target, self._jobs.store.read(item.result_path))
                     success += 1
-                except Exception:
+                except OSError:
                     pass
-            self._status.setText(f"\u2705 \u5df2\u5bfc\u51fa {success}/{len(self._conversion_results)} \u4e2a\u6587\u4ef6")
+            self._status.setText(f"已导出 {success}/{len(available)} 个文件")
             return
         if not self._current_markdown:
-            QMessageBox.information(self, "提示", "没有可保存的内容。")
             return
-        ask = self._settings.ask_save_each_time
-        default_dir = self._settings.default_save_path
-        if ask or not default_dir:
-            suggested = "output.md"
-            if self._current_file:
-                base = os.path.splitext(os.path.basename(self._current_file))[0]
-                suggested = base + ".md"
-            path, _ = QFileDialog.getSaveFileName(self, "保存 Markdown", suggested, "Markdown (*.md);;所有文件 (*)")
-        else:
-            base = os.path.splitext(os.path.basename(self._current_file or "output"))[0]
-            path = os.path.join(default_dir, base + ".md")
-        if path:
-            try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(self._current_markdown)
-                self._status.setText(f"已保存: {path}")
-            except OSError as e:
-                QMessageBox.critical(self, "保存失败", str(e))
+        name = os.path.splitext(os.path.basename(self._current_file or "output"))[0] + ".md"
+        target, _ = QFileDialog.getSaveFileName(self, "导出 Markdown", name, "Markdown (*.md)")
+        if target:
+            PathLike.write(target, self._current_markdown)
+            self._status.setText(f"已导出：{target}")
 
-    def _copy_to_clipboard(self):
-        if not self._current_markdown:
-            QMessageBox.information(self, "提示", "没有可复制的内容。")
-            return
-        QApplication.clipboard().setText(self._current_markdown)
-        self._status.setText("已复制到剪贴板")
+    def _copy_to_clipboard(self) -> None:
+        if self._current_markdown:
+            QApplication.clipboard().setText(self._current_markdown)
+            self._status.setText("已复制到剪贴板")
 
-    def _clear_content(self):
-        self._current_file = None
-        self._current_markdown = ""
-        self._file_list.clear()
-        self._conversion_results.clear()
-        self._queue_running = False
-        self._queue_index = 0
-        self._file_manually_selected = False
-        self._upload_panel.clear_queue()
-        self._preview.clear()
-        self._status.setText("已清空")
-
-    def _browse_save_path(self):
-        path = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u9ed8\u8ba4\u4fdd\u5b58\u8def\u5f84")
-        if path:
-            self._settings.default_save_path = path
-            self._path_lbl.setText(path)
-            self._settings.sync()
-
-    def _load_settings_values(self):
-        mode = self._settings.theme_mode or "system"
-        if mode == "system": self._sys_rb.setChecked(True)
-        elif mode == "dark": self._dark_rb.setChecked(True)
-        else: self._light_rb.setChecked(True)
-        self._ask_cb.setChecked(self._settings.ask_save_each_time)
-        self._max_spin.setValue(self._settings.max_history)
-
-    def _save_settings_values(self):
-        if self._sys_rb.isChecked(): self._settings.theme_mode = "system"
-        elif self._dark_rb.isChecked(): self._settings.theme_mode = "dark"
-        else: self._settings.theme_mode = "light"
-        self._settings.ask_save_each_time = self._ask_cb.isChecked()
-        self._settings.max_history = self._max_spin.value()
-        self._settings.sync()
-        self._theme.set_mode(self._settings.theme_mode)
-        self._status.setText("\u8bbe\u7f6e\u5df2\u4fdd\u5b58")
-
-    def _open_settings(self):
+    def _open_settings(self) -> None:
         from .dialogs import SettingsDialog
+        SettingsDialog(self._settings, self._theme, self._float_win, self).exec()
+        self._jobs.limits = self._resource_limits()
 
-        dlg = SettingsDialog(self._settings, self._theme, self._float_win, self)
-        dlg.exec()
-        self.history_mgr._max = self._settings.max_history
-
-    def _clear_history(self):
-        self.history_mgr.clear()
-        if hasattr(self, "_history_page_list"):
-            self._history_page_list.clear()
-        self._refresh_history()
-
-    def _refresh_history(self):
+    def _refresh_history(self) -> None:
         self._hist_panel.list_widget.clear()
         for entry in self.history_mgr.entries:
-            ts = time.strftime("%H:%M", time.localtime(entry.timestamp))
-            preview = entry.output_preview[:50] if entry.output_preview else ''
-            text = f"{entry.file_name}  |  {ts}  |  {preview}"
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, entry.file_path)
-            item.setToolTip(entry.file_path)
-            self._hist_panel.list_widget.addItem(item)
+            item = self._hist_panel.list_widget.addItem(
+                f"{entry.file_name}  ·  {time.strftime('%Y-%m-%d %H:%M', time.localtime(entry.timestamp))}"
+            )
+        # QListWidget.addItem returns None; attach paths in a second pass.
+        for index, entry in enumerate(self.history_mgr.entries):
+            self._hist_panel.list_widget.item(index).setData(Qt.UserRole, entry.file_path)
         self._hist_panel.set_count(len(self.history_mgr.entries))
 
-    def _on_history_clicked(self, item):
+    def _clear_history(self) -> None:
+        self.history_mgr.clear()
+        self._refresh_history()
+
+    def _on_history_clicked(self, item) -> None:
         path = item.data(Qt.UserRole)
         if path and os.path.isfile(path):
+            self._history_dock.hide()
             self._on_files_dropped([path])
-            self._convert_file(path)
 
-    @staticmethod
-    def _format_size(size):
-        for unit in ("B", "KB", "MB", "GB"):
-            if size < 1024:
-                return f"{size:.1f} {unit}"
-            size /= 1024
-        return f"{size:.1f} TB"
+    def set_float_window(self, window) -> None:
+        self._float_win = window
 
-
-    def _on_nav_changed(self, nav_id):
-        """Handle top navigation."""
-        self._navbar.set_active(nav_id)
-        if nav_id == "settings":
-            self._open_settings()
-        elif nav_id == "file":
-            self._open_file()
-        elif nav_id == "history":
-            self._toggle_history_size()
-
-    def _toggle_history_size(self):
-        """Toggle outer splitter between 50/50 and default 60/40."""
-        sizes = self._outer_splitter.sizes()
-        total = sum(sizes)
-        if total < 100:
-            return
-        ratio = sizes[0] / total if total > 0 else 0.6
-        if 0.45 <= ratio <= 0.55:
-            default = getattr(self._outer_splitter, "_default_sizes", None) or [780, 220]
-            self._outer_splitter.setSizes(default)
-            self._status.setText("已收起历史面板")
-        else:
-            half = total // 2
-            self._outer_splitter.setSizes([half, total - half])
-            self._status.setText("历史面板已展开")
-
-    def set_float_window(self, win):
-        self._float_win = win
-
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         self._settings.window_geometry = self.saveGeometry()
-        self._settings.window_splitter_outer = self._outer_splitter.saveState()
-        self._settings.window_splitter_inner = self._inner_splitter.saveState()
         self._settings.sync()
         if self._settings.close_to_tray:
             event.ignore()
             self.hide()
-        else:
-            from PySide6.QtWidgets import QApplication
-            QApplication.quit()
+            return
+        self._jobs.store.cleanup()
+        QApplication.quit()
+
+
+class PathSuffix:
+    @staticmethod
+    def is_ocr_file(path: str) -> bool:
+        return os.path.splitext(path)[1].lower() in {".pdf", ".jpg", ".jpeg", ".png"}
+
+
+class PathLike:
+    @staticmethod
+    def write(path: str, content: str) -> None:
+        with open(path, "w", encoding="utf-8") as stream:
+            stream.write(content)

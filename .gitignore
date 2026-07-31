@@ -33,6 +33,9 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!markitdown-desktop/build.spec
+!markitdown-desktop/build_fast.spec
+!markitdown-desktop/ocr-engine/ocr_engine.spec
 
 # Installer logs
 pip-log.txt
@@ -127,6 +130,10 @@ celerybeat.pid
 # Environments
 .env
 .venv
+markitdown-desktop/.venv-build/
+markitdown-desktop/ocr-engine/.model-cache/
+markitdown-desktop/ocr-engine/.pyinstaller-dist-*/
+markitdown-desktop/ocr-engine/.pyinstaller-dist/
 env/
 venv/
 ENV/

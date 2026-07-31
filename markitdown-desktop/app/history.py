@@ -16,7 +16,7 @@ class HistoryEntry:
     file_size: int
     file_type: str
     timestamp: float
-    output_preview: str  # first 200 chars
+    output_preview: str = ""  # retained only for backwards-compatible reads
 
 
 class HistoryManager:
@@ -70,7 +70,7 @@ class HistoryManager:
 
     @staticmethod
     def make_entry(
-        file_path: str, output_text: str, preview_len: int = 200
+        file_path: str, output_text: str = "", preview_len: int = 200
     ) -> HistoryEntry:
         name = os.path.basename(file_path)
         _, ext = os.path.splitext(name)
@@ -78,12 +78,11 @@ class HistoryManager:
             size = os.path.getsize(file_path)
         except OSError:
             size = 0
-        preview = output_text.strip()[:preview_len].replace("\n", " ")
         return HistoryEntry(
             file_path=file_path,
             file_name=name,
             file_size=size,
             file_type=ext.lower(),
             timestamp=time.time(),
-            output_preview=preview,
+            output_preview="",
         )

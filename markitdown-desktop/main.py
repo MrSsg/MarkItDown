@@ -21,8 +21,38 @@ from app.main_window import MainWindow
 from app.float_window import FloatWindow
 
 
+def _smoke_convert(file_path: str, result_path: str | None = None) -> int:
+    """Headless conversion entry point used by clean-machine package tests."""
+    try:
+        from markitdown import MarkItDown
+
+        result = MarkItDown().convert(file_path)
+        output = result.markdown or "# MarkItDown conversion completed"
+        if result_path:
+            with open(result_path, "w", encoding="utf-8") as stream:
+                stream.write("ok\n" + output)
+        else:
+            print(output)
+        return 0
+    except Exception as exc:
+        if result_path:
+            with open(result_path, "w", encoding="utf-8") as stream:
+                stream.write("error\n" + str(exc))
+        print(f"Conversion failed: {exc}", file=sys.stderr)
+        return 1
+
 
 def main() -> None:
+    if "--smoke-convert" in sys.argv:
+        index = sys.argv.index("--smoke-convert")
+        if index + 1 >= len(sys.argv):
+            raise SystemExit(2)
+        result_path = None
+        if "--smoke-output" in sys.argv:
+            output_index = sys.argv.index("--smoke-output")
+            if output_index + 1 < len(sys.argv):
+                result_path = sys.argv[output_index + 1]
+        raise SystemExit(_smoke_convert(sys.argv[index + 1], result_path))
     app = QApplication(sys.argv)
     app.setApplicationName("MarkConvert Desk")
     app.setOrganizationName(__app_name__)
@@ -41,6 +71,7 @@ def main() -> None:
 
     # ── 窗口 ──
     main_win = MainWindow(settings, theme_mgr, history_mgr)
+    app.aboutToQuit.connect(main_win._jobs.store.cleanup)
     main_win.setWindowIcon(icon)
 
     float_win = FloatWindow(settings, theme_mgr)
