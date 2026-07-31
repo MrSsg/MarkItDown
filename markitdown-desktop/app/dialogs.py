@@ -1,10 +1,94 @@
 # SPDX-License-Identifier: MIT
 """Dialogs: SettingsDialog."""
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QPushButton, QFileDialog, QDialogButtonBox, QRadioButton,
-    QCheckBox, QSpinBox, QMessageBox)
+    QCheckBox, QSpinBox, QMessageBox, QProgressBar)
+
+from .ocr import OcrComponentError
+
+
+class _OcrInstallThread(QThread):
+    progress = Signal(int)
+    complete = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, manager):
+        super().__init__()
+        self._manager = manager
+
+    def run(self):
+        try:
+            info = self._manager.install_from_manifest_url(
+                progress=lambda value: self.progress.emit(round(value * 100))
+            )
+            self.complete.emit(info)
+        except OcrComponentError as exc:
+            self.failed.emit(str(exc))
+
+
+class OcrInstallDialog(QDialog):
+    """Install or import the optional, locally executed OCR component."""
+
+    def __init__(self, manager, parent=None):
+        super().__init__(parent)
+        self._manager = manager
+        self._thread = None
+        self.setWindowTitle("安装离线 OCR")
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        self._status = QLabel("OCR 会在本机处理图片和扫描 PDF，不上传文件。")
+        self._status.setWordWrap(True)
+        layout.addWidget(self._status)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        layout.addWidget(self._progress)
+        buttons = QHBoxLayout()
+        self._download = QPushButton("下载并安装")
+        self._download.clicked.connect(self._download_component)
+        self._import = QPushButton("导入离线组件")
+        self._import.clicked.connect(self._import_component)
+        buttons.addWidget(self._download)
+        buttons.addWidget(self._import)
+        layout.addLayout(buttons)
+        close = QDialogButtonBox(QDialogButtonBox.Close)
+        close.rejected.connect(self.reject)
+        layout.addWidget(close)
+
+    def _download_component(self):
+        self._download.setEnabled(False)
+        self._import.setEnabled(False)
+        self._status.setText("正在下载 OCR 组件…")
+        self._thread = _OcrInstallThread(self._manager)
+        self._thread.progress.connect(self._progress.setValue)
+        self._thread.complete.connect(self._installed)
+        self._thread.failed.connect(self._failed)
+        self._thread.start()
+
+    def _import_component(self):
+        archive, _ = QFileDialog.getOpenFileName(self, "选择 OCR 组件 ZIP", "", "ZIP (*.zip)")
+        if not archive:
+            return
+        manifest, _ = QFileDialog.getOpenFileName(self, "选择 OCR 组件清单", "", "JSON (*.json)")
+        if not manifest:
+            return
+        try:
+            self._installed(self._manager.install_offline_archive(archive, manifest))
+        except OcrComponentError as exc:
+            self._failed(str(exc))
+
+    def _installed(self, info):
+        self._progress.setValue(100)
+        self._status.setText(f"OCR 组件已安装：v{info.version}")
+        self._download.setEnabled(True)
+        self._import.setEnabled(True)
+
+    def _failed(self, message):
+        self._status.setText(f"安装失败：{message}")
+        self._download.setEnabled(True)
+        self._import.setEnabled(True)
 
 
 class SettingsDialog(QDialog):
@@ -17,26 +101,6 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(460)
         self._build_ui()
         self._load_values()
-        self._populate_about_info()
-        QTimer.singleShot(0, self._populate_about_info)
-
-    def _check_and_show_update(self):
-        from app.__about__ import __version__ as _av, __app_name__ as _an
-        from app.updater import get_local_kernel_version as _kv, check_latest_release as _cr
-        _k = _kv()
-        _r = _cr()
-        _m = f"<h3>{_an} v{_av}</h3>"
-        _m += f"<p>内核: <b>markitdown v{_k}</b></p>"
-        if _r:
-            if _r.version > _k:
-                _m += '<p style="color:#407BFF">📦 新内核 <b>v' + _r.version + '</b> 可用</p>'
-                _m += '<p><a href="' + _r.html_url + '">查看发布页</a></p>'
-            else:
-                _m += '<p style="color:#4CAF50">✅ 内核已是最新</p>'
-        else:
-            _m += '<p style="color:#888">未能检查更新（网络不可达）</p>'
-        _m += "<hr><p style='color:#888'>基于 Microsoft MarkItDown 的桌面转换工具</p>"
-        QMessageBox.about(self, f"关于 {_an}", _m)
 
     def _build_ui(self):
         l = QVBoxLayout(self)
@@ -93,17 +157,24 @@ class SettingsDialog(QDialog):
         g3l.addWidget(clear_btn)
         l.addWidget(g3)
 
+        limits_group = QGroupBox("资源保护")
+        limits_layout = QVBoxLayout(limits_group)
+        self._max_file_spin = QSpinBox(); self._max_file_spin.setRange(200, 2048); self._max_file_spin.setSuffix(" MiB / 文件")
+        self._max_batch_spin = QSpinBox(); self._max_batch_spin.setRange(1, 1000); self._max_batch_spin.setSuffix(" 项 / 批次")
+        self._max_pdf_spin = QSpinBox(); self._max_pdf_spin.setRange(500, 5000); self._max_pdf_spin.setSuffix(" 页 / PDF")
+        self._max_zip_spin = QSpinBox(); self._max_zip_spin.setRange(1024, 10240); self._max_zip_spin.setSuffix(" MiB / ZIP 展开")
+        for control in (self._max_file_spin, self._max_batch_spin, self._max_pdf_spin, self._max_zip_spin):
+            limits_layout.addWidget(control)
+        l.addWidget(limits_group)
+
         # About section
         about_group = QGroupBox("关于")
         about_layout = QVBoxLayout(about_group)
         from app.__about__ import __version__ as _av, __app_name__ as _an
         self._about_app_lbl = QLabel(f"<b>{_an}</b> v{_av}")
-        self._about_kernel_lbl = QLabel("内核: 正在读取...")
+        self._about_kernel_lbl = QLabel("转换内核随完整桌面发行版更新")
         about_layout.addWidget(self._about_app_lbl)
         about_layout.addWidget(self._about_kernel_lbl)
-        _cb = QPushButton("检查更新")
-        _cb.clicked.connect(self._check_and_show_update)
-        about_layout.addWidget(_cb)
         l.addWidget(about_group)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -143,11 +214,10 @@ class SettingsDialog(QDialog):
         if not self._settings.ask_save_each_time:
             self._path_lbl.setText(self._settings.default_save_path or "（未设置）")
         self._max_spin.setValue(self._settings.max_history)
-
-    def _populate_about_info(self):
-        from app.updater import get_local_kernel_version as _kv
-
-        self._about_kernel_lbl.setText(f"内核: markitdown v{_kv()}")
+        self._max_file_spin.setValue(self._settings.max_file_mib)
+        self._max_batch_spin.setValue(self._settings.max_batch_items)
+        self._max_pdf_spin.setValue(self._settings.max_pdf_pages)
+        self._max_zip_spin.setValue(self._settings.max_zip_mib)
 
     def _save_values(self):
         if self._sys_rb.isChecked(): self._settings.theme_mode = "system"
@@ -157,6 +227,10 @@ class SettingsDialog(QDialog):
         self._settings.close_to_tray = self._tray_rb.isChecked()
         self._settings.ask_save_each_time = self._ask_cb.isChecked()
         self._settings.max_history = self._max_spin.value()
+        self._settings.max_file_mib = self._max_file_spin.value()
+        self._settings.max_batch_items = self._max_batch_spin.value()
+        self._settings.max_pdf_pages = self._max_pdf_spin.value()
+        self._settings.max_zip_mib = self._max_zip_spin.value()
         self._settings.sync()
         self._theme.set_mode(self._settings.theme_mode)
 

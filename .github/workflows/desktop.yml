@@ -1,0 +1,52 @@
+name: desktop
+
+permissions:
+  contents: write
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  desktop-regression:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build desktop release
+        shell: pwsh
+        run: ./markitdown-desktop/build_fast.ps1
+      - name: Test real executable
+        shell: pwsh
+        run: ./markitdown-desktop/test_release.ps1
+
+  ocr-release:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build signed OCR component
+        shell: pwsh
+        env:
+          MARKITDOWN_OCR_SIGNING_KEY: ${{ secrets.MARKITDOWN_OCR_SIGNING_KEY }}
+        run: ./markitdown-desktop/ocr-engine/build.ps1
+      - name: Test OCR release archive
+        shell: pwsh
+        run: ./markitdown-desktop/ocr-engine/test_release_ocr.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocr-engine
+          path: markitdown-desktop/ocr-engine/dist/
+      - name: Publish OCR release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            markitdown-desktop/ocr-engine/dist/ocr-engine.zip
+            markitdown-desktop/ocr-engine/dist/ocr-engine-manifest.json

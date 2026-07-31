@@ -138,6 +138,40 @@ class AppSettings:
     def max_history(self, val: int) -> None:
         self._settings.setValue("history/max", val)
 
+    # ── 资源保护 ──────────────────────────────────────────
+
+    @property
+    def max_file_mib(self) -> int:
+        return self._settings.value("limits/max_file_mib", 200, type=int)
+
+    @max_file_mib.setter
+    def max_file_mib(self, value: int) -> None:
+        self._settings.setValue("limits/max_file_mib", value)
+
+    @property
+    def max_batch_items(self) -> int:
+        return self._settings.value("limits/max_batch_items", 100, type=int)
+
+    @max_batch_items.setter
+    def max_batch_items(self, value: int) -> None:
+        self._settings.setValue("limits/max_batch_items", value)
+
+    @property
+    def max_pdf_pages(self) -> int:
+        return self._settings.value("limits/max_pdf_pages", 500, type=int)
+
+    @max_pdf_pages.setter
+    def max_pdf_pages(self, value: int) -> None:
+        self._settings.setValue("limits/max_pdf_pages", value)
+
+    @property
+    def max_zip_mib(self) -> int:
+        return self._settings.value("limits/max_zip_mib", 1024, type=int)
+
+    @max_zip_mib.setter
+    def max_zip_mib(self, value: int) -> None:
+        self._settings.setValue("limits/max_zip_mib", value)
+
     # ── 写入磁盘 ──────────────────────────────────────────
 
     def sync(self) -> None:

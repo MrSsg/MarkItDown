@@ -12,7 +12,7 @@ def _resource_path(relative: str) -> str:
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, relative)
 
-class ThemeColors:
+class ThemePalette:
     """Holds the full color palette for one theme (light or dark)."""
     def __init__(self, is_dark: bool):
         if is_dark:
@@ -35,6 +35,10 @@ class ThemeColors:
             self.border = "#E5E6EB"
             self.accent_border = "#407BFF40"
             self.topbar_bg = "#FFFFFF"
+        self.brand = "#407BFF"
+        self.success = "#00B42A"
+        self.warning = "#FF7D00"
+        self.error = "#F53F3F"
 
 class ThemeManager(QObject):
     theme_changed = Signal(str)
@@ -49,7 +53,7 @@ class ThemeManager(QObject):
         super().__init__(parent)
         self._mode = "system"
         self._current = "light"
-        self._colors = ThemeColors(False)
+        self._colors = ThemePalette(False)
         hints = QApplication.styleHints()
         try:
             hints.colorSchemeChanged.connect(self._on_scheme_changed)
@@ -109,7 +113,7 @@ class ThemeManager(QObject):
 
     def _apply(self, theme):
         self._current = theme
-        self._colors = ThemeColors(theme == "dark")
+        self._colors = ThemePalette(theme == "dark")
         qss_path = _resource_path(f"app/styles/{theme}.qss")
         app = QApplication.instance()
         if app is None:
@@ -117,9 +121,16 @@ class ThemeManager(QObject):
         try:
             with open(qss_path, "r", encoding="utf-8") as f:
                 qss = f.read()
-            # Resolve relative asset URLs to absolute paths
-            asset_dir = _resource_path("assets").replace("\\", "/")
-            qss = qss.replace("url(assets/", f"url({asset_dir}/")
+            tokens = {
+                "@BG@": self._colors.bg, "@CARD@": self._colors.card_bg,
+                "@HOVER@": self._colors.card_hover, "@TEXT@": self._colors.primary_text,
+                "@BODY@": self._colors.body_text, "@MUTED@": self._colors.secondary_text,
+                "@BORDER@": self._colors.border, "@BRAND@": self._colors.brand,
+                "@SUCCESS@": self._colors.success, "@WARNING@": self._colors.warning,
+                "@ERROR@": self._colors.error,
+            }
+            for key, value in tokens.items():
+                qss = qss.replace(key, value)
             app.setStyleSheet(qss)
         except FileNotFoundError:
             app.setStyleSheet("")
