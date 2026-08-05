@@ -11,6 +11,14 @@ from io import BytesIO
 from pathlib import Path
 
 
+def configure_stdio() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
+
 def emit(event_type: str, request_id: str = "", **data) -> None:
     print(json.dumps({"type": event_type, "request_id": request_id, **data}, ensure_ascii=False), flush=True)
 
@@ -114,4 +122,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    configure_stdio()
     raise SystemExit(main())

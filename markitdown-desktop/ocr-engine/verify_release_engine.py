@@ -61,7 +61,10 @@ def main() -> None:
         code, events, diagnostic = run_engine(args.engine, request(path, file_type, request_id))
         result = next((event for event in events if event.get("type") == "result"), None)
         text = "\n".join(str(page.get("markdown", "")) for page in (result or {}).get("pages", []))
-        require(code == 0 and result is not None and result.get("request_id") == request_id, f"OCR {file_type} 识别回归失败: {diagnostic}")
+        require(
+            code == 0 and result is not None and result.get("request_id") == request_id,
+            f"OCR {file_type} 识别回归失败: events={events!r}; stderr={diagnostic}",
+        )
         if expected:
             require(expected in text, f"OCR {file_type} 未识别预期中文文本: {text}")
 
