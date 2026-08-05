@@ -24,6 +24,7 @@ a = Analysis(
         ('assets/markconvert_float_16.png', 'assets'),
         ('assets/markconvert_float_32.png', 'assets'),
         ('assets/markconvert_float_128.png', 'assets'),
+        ('assets/markconvert_float.svg', 'assets'),
         ('assets/check.png', 'assets'),
         ('assets/Convert.png', 'assets'),
         ('assets/copy.png', 'assets'),
@@ -68,4 +69,5 @@ exe = EXE(
     runtime_tmpdir=None, console=False, disable_windowed_traceback=False,
     argv_emulation=False, target_arch=None, codesign_identity=None,
     entitlements_file=None, icon='assets/app_icon.ico',
+    manifest='app/windows.manifest',
 )

@@ -3,7 +3,6 @@
 import os, sys
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QColor
 
 def _resource_path(relative: str) -> str:
     if getattr(sys, "frozen", False):
@@ -20,34 +19,54 @@ class ThemePalette:
             self.card_bg = "#1C1F28"
             self.card_hover = "#272B36"
             self.primary_text = "#F5F7FA"
-            self.body_text = "#C9CDD4"
-            self.secondary_text = "#86909C"
+            self.body_text = "#D5D9E2"
+            self.secondary_text = "#AAB2C0"
             self.border = "#303643"
             self.accent_border = "#407BFF50"
             self.topbar_bg = "#1C1F28"
+            self.brand_strong = "#78A8FF"
+            self.brand_text = "#A7C7FF"
+            self.brand_on = "#10233F"
+            self.focus = "#9CC0FF"
+            self.success_text = "#56D364"
+            self.warning_text = "#FDB022"
+            self.error_text = "#FF8A8A"
+            self.success_bg = "#123A24"
+            self.warning_bg = "#3D2B13"
+            self.error_bg = "#421F24"
         else:
             self.bg = "#F7F8FC"
             self.card_bg = "#FFFFFF"
             self.card_hover = "#F2F5FF"
             self.primary_text = "#1D2129"
-            self.body_text = "#4E5969"
-            self.secondary_text = "#86909C"
+            self.body_text = "#344054"
+            self.secondary_text = "#667085"
             self.border = "#E5E6EB"
             self.accent_border = "#407BFF40"
             self.topbar_bg = "#FFFFFF"
+            self.brand_strong = "#245FD6"
+            self.brand_text = "#1F5BC9"
+            self.brand_on = "#FFFFFF"
+            self.focus = "#245FD6"
+            self.success_text = "#087F23"
+            self.warning_text = "#B54708"
+            self.error_text = "#D92D20"
+            self.success_bg = "#ECFDF3"
+            self.warning_bg = "#FFFAEB"
+            self.error_bg = "#FEF3F2"
         self.brand = "#407BFF"
-        self.success = "#00B42A"
-        self.warning = "#FF7D00"
-        self.error = "#F53F3F"
+        self.success = self.success_text
+        self.warning = self.warning_text
+        self.error = self.error_text
 
 class ThemeManager(QObject):
     theme_changed = Signal(str)
 
     BRAND = "#407BFF"
-    SUCCESS = "#00B42A"
-    WARNING = "#FF7D00"
-    ERROR = "#F53F3F"
-    DISABLED = "#86909C"
+    SUCCESS = "#087F23"
+    WARNING = "#B54708"
+    ERROR = "#D92D20"
+    DISABLED = "#667085"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,7 +135,7 @@ class ThemeManager(QObject):
         self._colors = ThemePalette(theme == "dark")
         qss_path = _resource_path(f"app/styles/{theme}.qss")
         app = QApplication.instance()
-        if app is None:
+        if app is None or not hasattr(app, "setStyleSheet"):
             return
         try:
             with open(qss_path, "r", encoding="utf-8") as f:
@@ -126,8 +145,16 @@ class ThemeManager(QObject):
                 "@HOVER@": self._colors.card_hover, "@TEXT@": self._colors.primary_text,
                 "@BODY@": self._colors.body_text, "@MUTED@": self._colors.secondary_text,
                 "@BORDER@": self._colors.border, "@BRAND@": self._colors.brand,
-                "@SUCCESS@": self._colors.success, "@WARNING@": self._colors.warning,
-                "@ERROR@": self._colors.error,
+                "@BRAND_STRONG@": self._colors.brand_strong,
+                "@BRAND_TEXT@": self._colors.brand_text,
+                "@BRAND_ON@": self._colors.brand_on,
+                "@FOCUS@": self._colors.focus,
+                "@SUCCESS@": self._colors.success_text,
+                "@WARNING@": self._colors.warning_text,
+                "@ERROR@": self._colors.error_text,
+                "@SUCCESS_BG@": self._colors.success_bg,
+                "@WARNING_BG@": self._colors.warning_bg,
+                "@ERROR_BG@": self._colors.error_bg,
             }
             for key, value in tokens.items():
                 qss = qss.replace(key, value)

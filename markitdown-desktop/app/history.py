@@ -25,11 +25,15 @@ class HistoryEntry:
 class HistoryManager:
     """历史记录管理，JSON 文件持久化。"""
 
-    def __init__(self, max_entries: int = 50) -> None:
+    def __init__(self, max_entries: int = 50, path: str | os.PathLike[str] | None = None) -> None:
         self._max = max_entries
-        data_dir = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        data_dir = (
+            os.path.dirname(os.path.abspath(os.fspath(path)))
+            if path is not None
+            else QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        )
         os.makedirs(data_dir, exist_ok=True)
-        self._path = os.path.join(data_dir, "history.json")
+        self._path = os.path.abspath(os.fspath(path)) if path is not None else os.path.join(data_dir, "history.json")
         self._entries: List[HistoryEntry] = []
         self._load()
 
@@ -67,6 +71,44 @@ class HistoryManager:
                 entry.pinned_path = pinned_path
                 break
         self._save()
+
+    @property
+    def pinned_entries(self) -> List[HistoryEntry]:
+        return [entry for entry in self._entries if entry.pinned_path]
+
+    def unpin(self, file_path: str) -> str:
+        """Detach and remove the managed pinned result for one source file."""
+        pinned_path = ""
+        for entry in self._entries:
+            if entry.file_path == file_path:
+                pinned_path = entry.pinned_path
+                entry.pinned_path = ""
+                break
+        if pinned_path:
+            self._delete_managed_pinned(pinned_path)
+        self._save()
+        return pinned_path
+
+    def clear_pins(self) -> List[str]:
+        """Detach and remove every managed pinned result."""
+        paths = [entry.pinned_path for entry in self._entries if entry.pinned_path]
+        for entry in self._entries:
+            entry.pinned_path = ""
+        for path in paths:
+            self._delete_managed_pinned(path)
+        self._save()
+        return paths
+
+    def _delete_managed_pinned(self, pinned_path: str) -> None:
+        target = os.path.abspath(pinned_path)
+        root = os.path.abspath(os.path.join(os.path.dirname(self._path), "pinned"))
+        try:
+            if os.path.commonpath([target, root]) != root:
+                return
+            if os.path.isfile(target):
+                os.remove(target)
+        except (OSError, ValueError):
+            pass
 
     def _load(self) -> None:
         if not os.path.isfile(self._path):

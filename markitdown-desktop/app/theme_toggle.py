@@ -7,6 +7,8 @@ from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QPushButton, QStyle, QStyleOptionButton, QStylePainter
 
+from .theme import ThemeManager
+
 
 class ThemeToggleButton(QPushButton):
     """A vector sun/moon control with a short cross-rotate transition."""
@@ -16,6 +18,8 @@ class ThemeToggleButton(QPushButton):
         self._is_dark = False
         self._previous_is_dark = False
         self._transition = 1.0
+        self._icon_color = QColor(ThemeManager.BRAND)
+        self._motion_enabled = True
         self._animation = QPropertyAnimation(self, b"transition", self)
         self._animation.setDuration(220)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -43,13 +47,20 @@ class ThemeToggleButton(QPushButton):
         self._previous_is_dark = self._is_dark
         self._is_dark = is_dark
         self._animation.stop()
-        if animate and self.isVisible():
+        if animate and self._motion_enabled and self.isVisible():
             self.set_transition(0.0)
             self._animation.setStartValue(0.0)
             self._animation.setEndValue(1.0)
             self._animation.start()
         else:
             self.set_transition(1.0)
+
+    def set_accent_color(self, color: str) -> None:
+        self._icon_color = QColor(color)
+        self.update()
+
+    def set_reduced_motion(self, reduced: bool) -> None:
+        self._motion_enabled = not reduced
 
     def paintEvent(self, event) -> None:
         option = QStyleOptionButton()
@@ -67,13 +78,12 @@ class ThemeToggleButton(QPushButton):
         else:
             self._paint_icon(painter, center, self._is_dark, 0.0, 1.0)
 
-    @staticmethod
-    def _paint_icon(painter: QPainter, center, is_dark: bool, rotation: float, opacity: float) -> None:
+    def _paint_icon(self, painter: QPainter, center, is_dark: bool, rotation: float, opacity: float) -> None:
         painter.save()
         painter.translate(center)
         painter.rotate(rotation)
         painter.setOpacity(opacity)
-        color = QColor("#407BFF")
+        color = self._icon_color
         pen = QPen(color, 1.8)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)

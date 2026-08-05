@@ -171,25 +171,49 @@ class OcrComponentManager:
         self,
         manifest_url: str = DEFAULT_MANIFEST_URL,
         progress: Callable[[float], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> OcrComponentInfo:
-        try:
-            with urllib.request.urlopen(manifest_url, timeout=20) as response:
-                manifest = json.loads(response.read().decode("utf-8"))
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            raise OcrComponentError(
-                "无法获取 OCR 组件清单", "MANIFEST_DOWNLOAD_FAILED"
-            ) from exc
+        if cancel_event and cancel_event.is_set():
+            raise OcrComponentError("OCR 组件安装已取消", "INSTALL_CANCELLED")
+        manifest = self._fetch_manifest(manifest_url)
         verify_manifest_signature(manifest, self.public_keys)
         self._verify_minimum_app_version(str(manifest["min_app_version"]))
+
+        current = self.status()
+        if current.installed and current.version:
+            try:
+                if Version(current.version) >= Version(str(manifest["version"])):
+                    return OcrComponentInfo(
+                        True,
+                        current.version,
+                        current.path,
+                        f"OCR 组件已是最新版 v{current.version}，无需重复下载",
+                    )
+            except InvalidVersion:
+                pass
 
         with tempfile.TemporaryDirectory(prefix="markitdown-ocr-") as temp_dir:
             archive = Path(temp_dir) / "ocr-engine.zip"
             self._download(
-                manifest["url"], archive, progress, int(manifest["size_bytes"])
+                manifest["url"], archive, progress, int(manifest["size_bytes"]), cancel_event
             )
+            if cancel_event and cancel_event.is_set():
+                raise OcrComponentError("OCR 组件安装已取消", "INSTALL_CANCELLED")
             return self.install_archive(
                 archive, manifest["version"], manifest["sha256"]
             )
+
+    def _fetch_manifest(self, manifest_url: str) -> dict:
+        try:
+            with urllib.request.urlopen(manifest_url, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise OcrComponentError(
+                "无法获取 OCR 组件清单", "MANIFEST_DOWNLOAD_FAILED"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise OcrComponentError("OCR 组件清单格式无效", "MANIFEST_INVALID")
+        return payload
 
     def install_archive(
         self,
@@ -200,6 +224,18 @@ class OcrComponentManager:
         archive = Path(archive_path)
         if not archive.is_file():
             raise OcrComponentError("未找到 OCR 组件压缩包", "ARCHIVE_MISSING")
+        current = self.status()
+        if current.installed and current.version:
+            try:
+                if Version(current.version) >= Version(version):
+                    return OcrComponentInfo(
+                        True,
+                        current.version,
+                        current.path,
+                        f"OCR 组件已是最新版 v{current.version}，无需重复安装",
+                    )
+            except InvalidVersion:
+                pass
         if sha256_file(archive).lower() != expected_sha256.lower():
             raise OcrComponentError("OCR 组件校验失败，文件可能损坏", "ARCHIVE_HASH_INVALID")
         try:
@@ -293,6 +329,7 @@ class OcrComponentManager:
         target: Path,
         progress: Callable[[float], None] | None,
         expected_size: int,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         request = urllib.request.Request(url, headers={"User-Agent": "MarkItDownDesk"})
         try:
@@ -302,6 +339,8 @@ class OcrComponentManager:
                 total = int(response.headers.get("Content-Length", "0") or 0)
                 done = 0
                 while chunk := response.read(1024 * 1024):
+                    if cancel_event and cancel_event.is_set():
+                        raise OcrComponentError("OCR 组件安装已取消", "INSTALL_CANCELLED")
                     stream.write(chunk)
                     done += len(chunk)
                     if progress:

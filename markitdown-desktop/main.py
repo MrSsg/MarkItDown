@@ -86,7 +86,7 @@ def main() -> None:
             _smoke_convert(sys.argv[index + 1], result_path, ocr_engine_path)
         )
     app = QApplication(sys.argv)
-    app.setApplicationName("MarkConvert Desk")
+    app.setApplicationName(__app_name__)
     app.setOrganizationName(__app_name__)
     app.setQuitOnLastWindowClosed(False)
 
@@ -113,6 +113,7 @@ def main() -> None:
 
     # ── 信号连接 ──
     float_win.file_dropped.connect(lambda p: main_win._on_files_dropped([p]))
+    float_win.import_requested.connect(main_win._open_file)
     float_win.show_main_requested.connect(main_win.show)
     float_win.show_main_requested.connect(main_win.raise_)
     float_win.show_main_requested.connect(main_win.activateWindow)

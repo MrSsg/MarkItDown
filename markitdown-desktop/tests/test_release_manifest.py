@@ -36,7 +36,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 "url": "https://github.com/example/release/ocr-engine.zip",
                 "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                 "size_bytes": archive.stat().st_size,
-                "min_app_version": "1.2.1",
+                "min_app_version": "1.2.2",
                 "key_id": "test",
             }
             manifest["signature"] = base64.b64encode(
@@ -55,7 +55,7 @@ class ReleaseManifestTests(unittest.TestCase):
             "url": "https://example.invalid/ocr-engine.zip",
             "sha256": "0" * 64,
             "size_bytes": 1,
-            "min_app_version": "1.2.1",
+            "min_app_version": "1.2.2",
             "key_id": "test",
             "signature": base64.b64encode(b"x" * 64).decode("ascii"),
         }

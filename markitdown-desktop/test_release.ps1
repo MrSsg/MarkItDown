@@ -4,11 +4,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 if (-not $ReleaseDirectory) {
-    $latest = Get-ChildItem (Join-Path $PSScriptRoot "dist") -Directory -Filter "py312-*" |
+    $distRoot = Join-Path $PSScriptRoot "dist"
+    $latest = Get-ChildItem $distRoot -Directory -Filter "MarkItDownDesk-fast-v*-windows-x64" |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
-    if (-not $latest) { throw "未找到 Python 3.12 发行目录" }
-    $ReleaseDirectory = Join-Path $latest.FullName "MarkItDownDesk-fast"
+    if (-not $latest) {
+        $latest = Get-ChildItem $distRoot -Directory -Filter "py312-*" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($latest) {
+            $latest = Get-Item (Join-Path $latest.FullName "MarkItDownDesk-fast")
+        }
+    }
+    if (-not $latest) { throw "未找到桌面发行目录" }
+    $ReleaseDirectory = $latest.FullName
 }
 $exe = Join-Path $ReleaseDirectory "MarkItDownDesk-fast.exe"
 if (-not (Test-Path $exe)) { throw "未找到发行版 EXE: $exe" }

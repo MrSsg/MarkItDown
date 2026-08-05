@@ -297,6 +297,36 @@ class JobController:
         ]
         return self.enqueue(failed)
 
+    def retry_item(self, file_path: str) -> JobItem | None:
+        """Reset one retryable failure without discarding other batch results."""
+        if self.state in (JobState.RUNNING, JobState.CANCELLING, JobState.TIMED_OUT_WAITING):
+            return None
+        target_index = next(
+            (index for index, item in enumerate(self.items) if item.file_path == file_path),
+            None,
+        )
+        if target_index is None:
+            return None
+        target = self.items[target_index]
+        if not target.failure or not target.failure.retryable or not os.path.isfile(target.file_path):
+            return None
+        # A single-item retry skips only earlier pending items. Later items stay
+        # queued and continue in their original order after the retried item.
+        for item in self.items[:target_index]:
+            if item.state == "queued":
+                item.state = "cancelled"
+        target.state = "queued"
+        target.failure = None
+        target.result_path = None
+        target.log_path = None
+        target.started_at = None
+        target.finished_at = None
+        self.index = target_index
+        self.cancel_requested = False
+        self.timed_out_path = None
+        self.state = JobState.IDLE
+        return target
+
     def _record_failure(self, item: JobItem) -> None:
         failure = item.failure
         if failure is None:

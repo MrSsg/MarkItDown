@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
 
 from app.jobs import JobController, JobFailure, JobState, ResourceLimits, SessionStore
+from app.history import HistoryManager
 from app.worker import ConvertWorker
 
 
@@ -86,6 +87,30 @@ class JobControllerTests(unittest.TestCase):
             large.write_text("small", encoding="utf-8")
             self.assertEqual(1, len(controller.retry_failures()))
 
+    def test_single_retry_keeps_later_queued_items(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = []
+            for name in ("one.txt", "two.txt", "three.txt"):
+                path = root / name
+                path.write_text(name, encoding="utf-8")
+                paths.append(str(path))
+            controller = self._controller(root)
+            controller.enqueue(paths)
+            controller.items[0].state = "success"
+            controller.items[1].state = "error"
+            controller.items[1].failure = JobFailure("conversion", "FAILED", "temporary")
+            controller.items[2].state = "queued"
+            controller.index = len(controller.items)
+            controller.state = JobState.COMPLETED
+
+            self.assertIsNotNone(controller.retry_item(paths[1]))
+            self.assertEqual("queued", controller.items[2].state)
+            current = controller.start()
+            self.assertEqual("two.txt", current.file_name)
+            next_item = controller.complete_current("retry")
+            self.assertEqual("three.txt", next_item.file_name)
+
     def test_nested_zip_is_rejected_without_extraction(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -111,6 +136,33 @@ class JobControllerTests(unittest.TestCase):
             pinned = store.pin(result, "source.txt")
             store.cleanup()
             self.assertEqual("markdown", pinned.read_text(encoding="utf-8"))
+
+    def test_history_manager_can_unpin_one_or_all_results(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_one = root / "one.txt"
+            source_two = root / "two.txt"
+            source_one.write_text("one", encoding="utf-8")
+            source_two.write_text("two", encoding="utf-8")
+            manager = HistoryManager(path=root / "history.json")
+            manager.add(HistoryManager.make_entry(str(source_one)))
+            manager.add(HistoryManager.make_entry(str(source_two)))
+            pinned_dir = root / "pinned"
+            pinned_dir.mkdir()
+            pinned_one = pinned_dir / "one.md"
+            pinned_two = pinned_dir / "two.md"
+            pinned_one.write_text("one", encoding="utf-8")
+            pinned_two.write_text("two", encoding="utf-8")
+            manager.mark_pinned(str(source_one), str(pinned_one))
+            manager.mark_pinned(str(source_two), str(pinned_two))
+
+            self.assertEqual(str(pinned_one), manager.unpin(str(source_one)))
+            self.assertFalse(pinned_one.exists())
+            self.assertEqual(1, len(manager.pinned_entries))
+            removed = manager.clear_pins()
+            self.assertEqual([str(pinned_two)], removed)
+            self.assertFalse(pinned_two.exists())
+            self.assertFalse(manager.pinned_entries)
 
     def test_failures_are_written_to_session_log_with_request_id(self):
         with tempfile.TemporaryDirectory() as temp:

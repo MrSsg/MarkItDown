@@ -2,6 +2,7 @@ import hashlib
 import json
 import sys
 import tempfile
+import unittest.mock as mock
 import unittest
 import zipfile
 from pathlib import Path
@@ -68,6 +69,39 @@ class OcrComponentManagerTests(unittest.TestCase):
             self.assertTrue(info.installed)
             self.assertEqual("1.0.0", manager.status().version)
             self.assertTrue(manager.status().path.is_file())
+
+    def test_manifest_install_skips_download_when_current_version_is_latest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = self._archive(root, {"ocr-engine.exe": b"engine"})
+            manifest = self._manifest(archive, version="1.0.0")
+            manager = OcrComponentManager(
+                root / "components", self.public_keys, health_check=lambda _path: None
+            )
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            manager.install_offline_archive(archive, manifest_path)
+
+            class Response:
+                headers = {}
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def read(self):
+                    return json.dumps(manifest).encode("utf-8")
+
+            with mock.patch("app.ocr.urllib.request.urlopen", return_value=Response()), mock.patch.object(
+                manager, "_download", side_effect=AssertionError("latest component was downloaded")
+            ):
+                info = manager.install_from_manifest_url("https://example.invalid/manifest.json")
+
+            self.assertTrue(info.installed)
+            self.assertEqual("1.0.0", info.version)
+            self.assertIn("最新版", info.message)
 
     def test_rejects_checksum_mismatch(self):
         with tempfile.TemporaryDirectory() as temp:
