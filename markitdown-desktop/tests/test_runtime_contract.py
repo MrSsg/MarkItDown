@@ -15,8 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 class JobControllerTests(unittest.TestCase):
     def _controller(self, root: Path) -> JobController:
         return JobController(
-            ResourceLimits(max_file_bytes=1024, max_batch_items=2, max_pdf_pages=500,
-                           max_zip_uncompressed_bytes=1024, max_zip_entries=10, max_zip_ratio=10),
+            ResourceLimits(
+                max_file_bytes=1024,
+                max_batch_items=2,
+                max_pdf_pages=500,
+                max_zip_uncompressed_bytes=1024,
+                max_zip_entries=10,
+                max_zip_ratio=10,
+            ),
             SessionStore(root / "sessions"),
         )
 
@@ -60,7 +66,9 @@ class JobControllerTests(unittest.TestCase):
             controller = self._controller(root)
             controller.enqueue([str(large)])
             self.assertEqual("FILE_TOO_LARGE", controller.items[0].failure.code)
-            controller.items[0].failure = JobFailure("conversion", "FAILED", "temporary")
+            controller.items[0].failure = JobFailure(
+                "conversion", "FAILED", "temporary"
+            )
             large.write_text("small", encoding="utf-8")
             self.assertEqual(1, len(controller.retry_failures()))
 
@@ -99,7 +107,9 @@ class JobControllerTests(unittest.TestCase):
             controller.enqueue([str(source)])
             item = controller.start()
             self.assertIsNotNone(item)
-            controller.fail_current(JobFailure("ocr", "INPUT_NOT_FOUND", "输入文件不存在", "detail"))
+            controller.fail_current(
+                JobFailure("ocr", "INPUT_NOT_FOUND", "输入文件不存在", "detail")
+            )
             logged = controller.store.read_log(controller.items[0].log_path)
             self.assertIn('"code": "INPUT_NOT_FOUND"', logged)
             self.assertIn(controller.items[0].request_id, logged)

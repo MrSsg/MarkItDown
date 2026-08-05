@@ -24,7 +24,10 @@ class _FakePage:
 
 class _FakePdf:
     def __init__(self):
-        self.pages = [_FakePage("这是原生文字页面，包含足够内容以确保不会被 OCR 重复处理，并且保留原有表格和文本提取结果。"), _FakePage("")]
+        self.pages = [
+            _FakePage("这是原生文字页面，包含足够内容以确保不会被 OCR 重复处理，并且保留原有表格和文本提取结果。"),
+            _FakePage(""),
+        ]
 
     def __enter__(self):
         return self

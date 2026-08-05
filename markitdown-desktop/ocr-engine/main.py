@@ -20,7 +20,12 @@ def configure_stdio() -> None:
 
 
 def emit(event_type: str, request_id: str = "", **data) -> None:
-    print(json.dumps({"type": event_type, "request_id": request_id, **data}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {"type": event_type, "request_id": request_id, **data}, ensure_ascii=False
+        ),
+        flush=True,
+    )
 
 
 def error_code(exc: Exception) -> str:
@@ -54,7 +59,11 @@ def ocr_image(ocr, image) -> str:
 
 
 def handle(request: dict) -> None:
-    engine_dir = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
+    engine_dir = (
+        Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+        .resolve()
+        .parent
+    )
     bundled_models = engine_dir / "models"
     if bundled_models.is_dir():
         # Keep all model files inside the optional component. This prevents a
@@ -74,7 +83,11 @@ def handle(request: dict) -> None:
     ocr = PaddleOCR(lang="ch", enable_mkldnn=False)
     if file_type == "image":
         emit("progress", request_id, current=1, total=1)
-        emit("result", request_id, pages=[{"number": 1, "markdown": ocr_image(ocr, str(input_path))}])
+        emit(
+            "result",
+            request_id,
+            pages=[{"number": 1, "markdown": ocr_image(ocr, str(input_path))}],
+        )
         return
     import fitz
 
@@ -85,8 +98,12 @@ def handle(request: dict) -> None:
     for current, page_number in enumerate(pages, start=1):
         page = document[page_number - 1]
         pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-        results.append({"number": page_number, "markdown": ocr_image(ocr, pixmap.tobytes("png"))})
-        emit("progress", request_id, current=current, total=len(pages), page=page_number)
+        results.append(
+            {"number": page_number, "markdown": ocr_image(ocr, pixmap.tobytes("png"))}
+        )
+        emit(
+            "progress", request_id, current=current, total=len(pages), page=page_number
+        )
     document.close()
     emit("result", request_id, pages=results)
 
@@ -95,11 +112,16 @@ def main() -> int:
     request_id = ""
     try:
         if "--health" in sys.argv:
-            engine_dir = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
+            engine_dir = (
+                Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+                .resolve()
+                .parent
+            )
             if not (engine_dir / "models" / "official_models").is_dir():
                 raise RuntimeError("bundled models missing")
             import paddle
             import paddleocr
+
             if not paddle.__version__ or not paddleocr.__version__:
                 raise RuntimeError("Paddle runtime unavailable")
             emit("health", status="ok", protocol_version=1)

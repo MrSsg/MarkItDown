@@ -25,17 +25,25 @@ class OcrComponentManagerTests(unittest.TestCase):
             serialization.Encoding.Raw, serialization.PublicFormat.Raw
         )
         import base64
+
         self.public_keys = {"test": base64.b64encode(public).decode("ascii")}
 
     def _manifest(self, archive: Path, version="1.0.0"):
         import base64
+
         manifest = {
-            "version": version, "url": "https://example.invalid/ocr-engine.zip",
+            "version": version,
+            "url": "https://example.invalid/ocr-engine.zip",
             "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-            "size_bytes": archive.stat().st_size, "min_app_version": "1.0.0", "key_id": "test",
+            "size_bytes": archive.stat().st_size,
+            "min_app_version": "1.0.0",
+            "key_id": "test",
         }
-        manifest["signature"] = base64.b64encode(self.private_key.sign(canonical_manifest_bytes(manifest))).decode("ascii")
+        manifest["signature"] = base64.b64encode(
+            self.private_key.sign(canonical_manifest_bytes(manifest))
+        ).decode("ascii")
         return manifest
+
     def _archive(self, directory: Path, entries: dict[str, bytes]) -> Path:
         archive = directory / "ocr-engine.zip"
         with zipfile.ZipFile(archive, "w") as package:
@@ -49,7 +57,9 @@ class OcrComponentManagerTests(unittest.TestCase):
             archive = self._archive(root, {"ocr-engine.exe": b"engine"})
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps(self._manifest(archive)), encoding="utf-8")
-            manager = OcrComponentManager(root / "components", self.public_keys, health_check=lambda _path: None)
+            manager = OcrComponentManager(
+                root / "components", self.public_keys, health_check=lambda _path: None
+            )
 
             info = manager.install_offline_archive(archive, manifest)
 
@@ -61,7 +71,9 @@ class OcrComponentManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             archive = self._archive(root, {"ocr-engine.exe": b"engine"})
-            manager = OcrComponentManager(root / "components", self.public_keys, health_check=lambda _path: None)
+            manager = OcrComponentManager(
+                root / "components", self.public_keys, health_check=lambda _path: None
+            )
             with self.assertRaises(OcrComponentError):
                 manager.install_archive(archive, "1.0.0", "0" * 64)
 
@@ -70,7 +82,9 @@ class OcrComponentManagerTests(unittest.TestCase):
             root = Path(temp)
             archive = self._archive(root, {"../ocr-engine.exe": b"engine"})
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-            manager = OcrComponentManager(root / "components", self.public_keys, health_check=lambda _path: None)
+            manager = OcrComponentManager(
+                root / "components", self.public_keys, health_check=lambda _path: None
+            )
             with self.assertRaises(OcrComponentError):
                 manager.install_archive(archive, "1.0.0", digest)
 
@@ -86,7 +100,12 @@ class OcrComponentManagerTests(unittest.TestCase):
 
 class OcrProtocolTests(unittest.TestCase):
     def test_protocol_requires_type(self):
-        self.assertEqual(parse_jsonl_event('{"type":"progress","request_id":"a","current":1}')["type"], "progress")
+        self.assertEqual(
+            parse_jsonl_event('{"type":"progress","request_id":"a","current":1}')[
+                "type"
+            ],
+            "progress",
+        )
         with self.assertRaises(OcrComponentError):
             parse_jsonl_event('{"current":1}')
 

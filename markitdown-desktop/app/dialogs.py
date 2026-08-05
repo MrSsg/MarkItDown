@@ -2,9 +2,21 @@
 """Dialogs: SettingsDialog."""
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QPushButton, QFileDialog, QDialogButtonBox, QRadioButton,
-    QCheckBox, QSpinBox, QMessageBox, QProgressBar)
+from PySide6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGroupBox,
+    QLabel,
+    QPushButton,
+    QFileDialog,
+    QDialogButtonBox,
+    QRadioButton,
+    QCheckBox,
+    QSpinBox,
+    QMessageBox,
+    QProgressBar,
+)
 
 from .ocr import OcrComponentError, OcrComponentManager
 
@@ -68,10 +80,14 @@ class OcrInstallDialog(QDialog):
         self._thread.start()
 
     def _import_component(self):
-        archive, _ = QFileDialog.getOpenFileName(self, "选择 OCR 组件 ZIP", "", "ZIP (*.zip)")
+        archive, _ = QFileDialog.getOpenFileName(
+            self, "选择 OCR 组件 ZIP", "", "ZIP (*.zip)"
+        )
         if not archive:
             return
-        manifest, _ = QFileDialog.getOpenFileName(self, "选择 OCR 组件清单", "", "JSON (*.json)")
+        manifest, _ = QFileDialog.getOpenFileName(
+            self, "选择 OCR 组件清单", "", "JSON (*.json)"
+        )
         if not manifest:
             return
         try:
@@ -86,7 +102,11 @@ class OcrInstallDialog(QDialog):
         self._import.setEnabled(True)
 
     def _failed(self, error):
-        payload = error if isinstance(error, dict) else {"code": "OCR_COMPONENT_ERROR", "message": str(error)}
+        payload = (
+            error
+            if isinstance(error, dict)
+            else {"code": "OCR_COMPONENT_ERROR", "message": str(error)}
+        )
         self._status.setText(f"安装失败 [{payload['code']}]：{payload['message']}")
         self._download.setEnabled(True)
         self._import.setEnabled(True)
@@ -115,8 +135,11 @@ class SettingsDialog(QDialog):
         browse_btn.clicked.connect(self._browse_path)
         self._ask_cb = QCheckBox("每次询问")
         self._ask_cb.toggled.connect(lambda c: browse_btn.setEnabled(not c))
-        br.addWidget(browse_btn); br.addWidget(self._ask_cb); br.addStretch()
-        g1l.addWidget(self._path_lbl); g1l.addLayout(br)
+        br.addWidget(browse_btn)
+        br.addWidget(self._ask_cb)
+        br.addStretch()
+        g1l.addWidget(self._path_lbl)
+        g1l.addLayout(br)
         l.addWidget(g1)
 
         g2 = QGroupBox("主题")
@@ -124,7 +147,9 @@ class SettingsDialog(QDialog):
         self._sys_rb = QRadioButton("跟随系统")
         self._dark_rb = QRadioButton("深色")
         self._light_rb = QRadioButton("浅色")
-        g2l.addWidget(self._sys_rb); g2l.addWidget(self._dark_rb); g2l.addWidget(self._light_rb)
+        g2l.addWidget(self._sys_rb)
+        g2l.addWidget(self._dark_rb)
+        g2l.addWidget(self._light_rb)
         l.addWidget(g2)
         self._sys_rb.toggled.connect(self._on_theme_toggled)
         self._dark_rb.toggled.connect(self._on_theme_toggled)
@@ -143,15 +168,18 @@ class SettingsDialog(QDialog):
         g_exit_l = QVBoxLayout(g_exit)
         self._tray_rb = QRadioButton("最小化到系统托盘")
         self._quit_rb = QRadioButton("完全退出应用")
-        g_exit_l.addWidget(self._tray_rb); g_exit_l.addWidget(self._quit_rb)
+        g_exit_l.addWidget(self._tray_rb)
+        g_exit_l.addWidget(self._quit_rb)
         l.addWidget(g_exit)
 
         g3 = QGroupBox("历史记录")
         g3l = QVBoxLayout(g3)
         hr = QHBoxLayout()
         hr.addWidget(QLabel("最大条数："))
-        self._max_spin = QSpinBox(); self._max_spin.setRange(10, 200)
-        hr.addWidget(self._max_spin); hr.addStretch()
+        self._max_spin = QSpinBox()
+        self._max_spin.setRange(10, 200)
+        hr.addWidget(self._max_spin)
+        hr.addStretch()
         g3l.addLayout(hr)
         clear_btn = QPushButton("清空历史")
         clear_btn.clicked.connect(self._clear_history)
@@ -160,11 +188,24 @@ class SettingsDialog(QDialog):
 
         limits_group = QGroupBox("资源保护")
         limits_layout = QVBoxLayout(limits_group)
-        self._max_file_spin = QSpinBox(); self._max_file_spin.setRange(200, 2048); self._max_file_spin.setSuffix(" MiB / 文件")
-        self._max_batch_spin = QSpinBox(); self._max_batch_spin.setRange(1, 1000); self._max_batch_spin.setSuffix(" 项 / 批次")
-        self._max_pdf_spin = QSpinBox(); self._max_pdf_spin.setRange(500, 5000); self._max_pdf_spin.setSuffix(" 页 / PDF")
-        self._max_zip_spin = QSpinBox(); self._max_zip_spin.setRange(1024, 10240); self._max_zip_spin.setSuffix(" MiB / ZIP 展开")
-        for control in (self._max_file_spin, self._max_batch_spin, self._max_pdf_spin, self._max_zip_spin):
+        self._max_file_spin = QSpinBox()
+        self._max_file_spin.setRange(200, 2048)
+        self._max_file_spin.setSuffix(" MiB / 文件")
+        self._max_batch_spin = QSpinBox()
+        self._max_batch_spin.setRange(1, 1000)
+        self._max_batch_spin.setSuffix(" 项 / 批次")
+        self._max_pdf_spin = QSpinBox()
+        self._max_pdf_spin.setRange(500, 5000)
+        self._max_pdf_spin.setSuffix(" 页 / PDF")
+        self._max_zip_spin = QSpinBox()
+        self._max_zip_spin.setRange(1024, 10240)
+        self._max_zip_spin.setSuffix(" MiB / ZIP 展开")
+        for control in (
+            self._max_file_spin,
+            self._max_batch_spin,
+            self._max_pdf_spin,
+            self._max_zip_spin,
+        ):
             limits_layout.addWidget(control)
         l.addWidget(limits_group)
 
@@ -172,6 +213,7 @@ class SettingsDialog(QDialog):
         about_group = QGroupBox("关于")
         about_layout = QVBoxLayout(about_group)
         from app.__about__ import __version__ as _av, __app_name__ as _an
+
         self._about_app_lbl = QLabel(f"<b>{_an}</b> v{_av}")
         self._about_kernel_lbl = QLabel("转换内核随完整桌面发行版更新")
         ocr_info = OcrComponentManager().status()
@@ -190,7 +232,8 @@ class SettingsDialog(QDialog):
         l.addWidget(about_group)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(self._save_values); btns.accepted.connect(self.accept)
+        btns.accepted.connect(self._save_values)
+        btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         l.addWidget(btns)
 
@@ -214,9 +257,12 @@ class SettingsDialog(QDialog):
 
     def _load_values(self):
         mode = self._settings.theme_mode or "system"
-        if mode == "system": self._sys_rb.setChecked(True)
-        elif mode == "dark": self._dark_rb.setChecked(True)
-        else: self._light_rb.setChecked(True)
+        if mode == "system":
+            self._sys_rb.setChecked(True)
+        elif mode == "dark":
+            self._dark_rb.setChecked(True)
+        else:
+            self._light_rb.setChecked(True)
         self._float_cb.setChecked(self._settings.show_float_window)
         if self._settings.close_to_tray:
             self._tray_rb.setChecked(True)
@@ -232,9 +278,12 @@ class SettingsDialog(QDialog):
         self._max_zip_spin.setValue(self._settings.max_zip_mib)
 
     def _save_values(self):
-        if self._sys_rb.isChecked(): self._settings.theme_mode = "system"
-        elif self._dark_rb.isChecked(): self._settings.theme_mode = "dark"
-        else: self._settings.theme_mode = "light"
+        if self._sys_rb.isChecked():
+            self._settings.theme_mode = "system"
+        elif self._dark_rb.isChecked():
+            self._settings.theme_mode = "dark"
+        else:
+            self._settings.theme_mode = "light"
         self._settings.show_float_window = self._float_cb.isChecked()
         self._settings.close_to_tray = self._tray_rb.isChecked()
         self._settings.ask_save_each_time = self._ask_cb.isChecked()

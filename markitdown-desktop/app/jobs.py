@@ -121,7 +121,9 @@ class SessionStore:
             raise FileNotFoundError("没有可固定的转换结果")
         directory = self.root.parent / "pinned"
         directory.mkdir(parents=True, exist_ok=True)
-        digest = hashlib.sha256((file_name + str(time.time_ns())).encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha256(
+            (file_name + str(time.time_ns())).encode("utf-8")
+        ).hexdigest()[:12]
         target = directory / f"{digest}-{Path(file_name).stem}.md"
         shutil.copy2(result_path, target)
         return target
@@ -130,7 +132,9 @@ class SessionStore:
 class JobController:
     """State-only controller. The UI owns worker creation and signal wiring."""
 
-    def __init__(self, limits: ResourceLimits | None = None, store: SessionStore | None = None) -> None:
+    def __init__(
+        self, limits: ResourceLimits | None = None, store: SessionStore | None = None
+    ) -> None:
         self.limits = limits or ResourceLimits()
         self.store = store or SessionStore()
         self.state = JobState.IDLE
@@ -154,7 +158,11 @@ class JobController:
         return sum(item.state == "success" for item in self.items)
 
     def enqueue(self, paths: Iterable[str]) -> list[JobItem]:
-        if self.state in (JobState.RUNNING, JobState.CANCELLING, JobState.TIMED_OUT_WAITING):
+        if self.state in (
+            JobState.RUNNING,
+            JobState.CANCELLING,
+            JobState.TIMED_OUT_WAITING,
+        ):
             return []
         candidates = list(dict.fromkeys(str(Path(path)) for path in paths))
         self.items = []
@@ -167,9 +175,16 @@ class JobController:
                 self._record_failure(item)
             self.items.append(item)
         for path in candidates[self.limits.max_batch_items :]:
-            item = JobItem(path, state="error", failure=JobFailure(
-                "preflight", "BATCH_LIMIT", f"批次最多允许 {self.limits.max_batch_items} 个文件", retryable=False
-            ))
+            item = JobItem(
+                path,
+                state="error",
+                failure=JobFailure(
+                    "preflight",
+                    "BATCH_LIMIT",
+                    f"批次最多允许 {self.limits.max_batch_items} 个文件",
+                    retryable=False,
+                ),
+            )
             self._record_failure(item)
             self.items.append(item)
         self.index = 0
@@ -195,7 +210,10 @@ class JobController:
                 item.started_at = time.monotonic()
                 item.request_id = uuid.uuid4().hex
                 item.log_path = self.store.write_log(
-                    item.file_path, event="started", request_id=item.request_id, stage="conversion"
+                    item.file_path,
+                    event="started",
+                    request_id=item.request_id,
+                    stage="conversion",
                 )
                 return item
             self.index += 1
@@ -206,7 +224,7 @@ class JobController:
         if self.state in (JobState.RUNNING, JobState.TIMED_OUT_WAITING):
             self.cancel_requested = True
             self.state = JobState.CANCELLING
-            for item in self.items[self.index + 1:]:
+            for item in self.items[self.index + 1 :]:
                 if item.state == "queued":
                     item.state = "cancelled"
 
@@ -223,13 +241,18 @@ class JobController:
         late = self.timed_out_path == current.file_path
         if late:
             current.state = "error"
-            current.failure = JobFailure("conversion", "CONVERSION_TIMEOUT", "转换超过 10 分钟", retryable=True)
+            current.failure = JobFailure(
+                "conversion", "CONVERSION_TIMEOUT", "转换超过 10 分钟", retryable=True
+            )
             self._record_failure(current)
         else:
             current.result_path = self.store.write(current.file_path, markdown)
             current.state = "success"
             current.log_path = self.store.write_log(
-                current.file_path, event="completed", request_id=current.request_id, stage="conversion"
+                current.file_path,
+                event="completed",
+                request_id=current.request_id,
+                stage="conversion",
             )
         current.finished_at = time.monotonic()
         self.index += 1
@@ -257,7 +280,13 @@ class JobController:
         return self.next_pending()
 
     def retry_failures(self) -> list[JobItem]:
-        failed = [item.file_path for item in self.failures if item.failure and item.failure.retryable and os.path.isfile(item.file_path)]
+        failed = [
+            item.file_path
+            for item in self.failures
+            if item.failure
+            and item.failure.retryable
+            and os.path.isfile(item.file_path)
+        ]
         return self.enqueue(failed)
 
     def _record_failure(self, item: JobItem) -> None:
@@ -281,7 +310,12 @@ class JobController:
             return JobFailure("preflight", "FILE_NOT_FOUND", "文件不存在", retryable=False)
         size = target.stat().st_size
         if size > self.limits.max_file_bytes:
-            return JobFailure("preflight", "FILE_TOO_LARGE", f"文件超过 {self.limits.max_file_bytes // 1024 // 1024} MiB 限制", retryable=False)
+            return JobFailure(
+                "preflight",
+                "FILE_TOO_LARGE",
+                f"文件超过 {self.limits.max_file_bytes // 1024 // 1024} MiB 限制",
+                retryable=False,
+            )
         suffix = target.suffix.lower()
         if suffix == ".zip":
             return self._inspect_zip(target)
@@ -292,9 +326,15 @@ class JobController:
     def _inspect_pdf(self, path: Path) -> JobFailure | None:
         try:
             import pdfplumber
+
             with pdfplumber.open(path) as pdf:
                 if len(pdf.pages) > self.limits.max_pdf_pages:
-                    return JobFailure("preflight", "PDF_PAGE_LIMIT", f"PDF 超过 {self.limits.max_pdf_pages} 页限制", retryable=False)
+                    return JobFailure(
+                        "preflight",
+                        "PDF_PAGE_LIMIT",
+                        f"PDF 超过 {self.limits.max_pdf_pages} 页限制",
+                        retryable=False,
+                    )
         except Exception:
             # Conversion itself reports malformed/encrypted PDFs with richer diagnostics.
             return None
@@ -305,15 +345,42 @@ class JobController:
             with zipfile.ZipFile(path) as archive:
                 entries = archive.infolist()
                 if len(entries) > self.limits.max_zip_entries:
-                    return JobFailure("preflight", "ZIP_ENTRY_LIMIT", f"ZIP 超过 {self.limits.max_zip_entries} 项限制", retryable=False)
-                if any(Path(entry.filename).suffix.lower() == ".zip" for entry in entries if not entry.is_dir()):
-                    return JobFailure("preflight", "ZIP_NESTED_ARCHIVE", "ZIP 不允许包含嵌套压缩包", retryable=False)
+                    return JobFailure(
+                        "preflight",
+                        "ZIP_ENTRY_LIMIT",
+                        f"ZIP 超过 {self.limits.max_zip_entries} 项限制",
+                        retryable=False,
+                    )
+                if any(
+                    Path(entry.filename).suffix.lower() == ".zip"
+                    for entry in entries
+                    if not entry.is_dir()
+                ):
+                    return JobFailure(
+                        "preflight",
+                        "ZIP_NESTED_ARCHIVE",
+                        "ZIP 不允许包含嵌套压缩包",
+                        retryable=False,
+                    )
                 uncompressed = sum(entry.file_size for entry in entries)
                 compressed = sum(entry.compress_size for entry in entries)
                 if uncompressed > self.limits.max_zip_uncompressed_bytes:
-                    return JobFailure("preflight", "ZIP_SIZE_LIMIT", "ZIP 展开后超过 1 GiB 限制", retryable=False)
-                if uncompressed and uncompressed / max(compressed, 1) > self.limits.max_zip_ratio:
-                    return JobFailure("preflight", "ZIP_RATIO_LIMIT", "ZIP 压缩率异常，可能包含压缩炸弹", retryable=False)
+                    return JobFailure(
+                        "preflight",
+                        "ZIP_SIZE_LIMIT",
+                        "ZIP 展开后超过 1 GiB 限制",
+                        retryable=False,
+                    )
+                if (
+                    uncompressed
+                    and uncompressed / max(compressed, 1) > self.limits.max_zip_ratio
+                ):
+                    return JobFailure(
+                        "preflight",
+                        "ZIP_RATIO_LIMIT",
+                        "ZIP 压缩率异常，可能包含压缩炸弹",
+                        retryable=False,
+                    )
         except (OSError, zipfile.BadZipFile):
             return JobFailure("preflight", "ZIP_INVALID", "ZIP 文件无效", retryable=False)
         return None

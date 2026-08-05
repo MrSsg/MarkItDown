@@ -27,10 +27,14 @@ DEFAULT_MANIFEST_URL = (
     "https://github.com/MrSsg/MarkItDown/releases/download/ocr-engine-v1/"
     "ocr-engine-manifest.json"
 )
+
+
 def _load_public_keys() -> dict[str, str]:
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
     try:
-        data = json.loads((root / "app" / "ocr_public_keys.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (root / "app" / "ocr_public_keys.json").read_text(encoding="utf-8")
+        )
         return {str(key): str(value) for key, value in data.items() if value}
     except (OSError, ValueError, TypeError):
         return {}
@@ -75,22 +79,42 @@ def parse_jsonl_event(line: str) -> dict:
     try:
         event = json.loads(line)
     except json.JSONDecodeError as exc:
-        raise OcrComponentError(f"OCR 引擎返回了无效 JSON: {line[:160]}", "PROTOCOL_INVALID") from exc
+        raise OcrComponentError(
+            f"OCR 引擎返回了无效 JSON: {line[:160]}", "PROTOCOL_INVALID"
+        ) from exc
     if not isinstance(event, dict) or not isinstance(event.get("type"), str):
         raise OcrComponentError("OCR 引擎事件缺少 type 字段", "PROTOCOL_INVALID")
-    if event["type"] in {"progress", "result", "error"} and not isinstance(event.get("request_id"), str):
+    if event["type"] in {"progress", "result", "error"} and not isinstance(
+        event.get("request_id"), str
+    ):
         raise OcrComponentError("OCR 引擎事件缺少 request_id 字段", "PROTOCOL_INVALID")
     return event
 
 
 def canonical_manifest_bytes(manifest: Mapping[str, object]) -> bytes:
     payload = {key: value for key, value in manifest.items() if key != "signature"}
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
 
 
-def verify_manifest_signature(manifest: Mapping[str, object], public_keys: Mapping[str, str]) -> None:
-    required = ("version", "url", "sha256", "size_bytes", "min_app_version", "key_id", "signature")
-    if not all(isinstance(manifest.get(key), str) and manifest[key] for key in required if key != "size_bytes"):
+def verify_manifest_signature(
+    manifest: Mapping[str, object], public_keys: Mapping[str, str]
+) -> None:
+    required = (
+        "version",
+        "url",
+        "sha256",
+        "size_bytes",
+        "min_app_version",
+        "key_id",
+        "signature",
+    )
+    if not all(
+        isinstance(manifest.get(key), str) and manifest[key]
+        for key in required
+        if key != "size_bytes"
+    ):
         raise OcrComponentError("OCR 组件清单不完整", "MANIFEST_INVALID")
     if not isinstance(manifest.get("size_bytes"), int) or manifest["size_bytes"] <= 0:
         raise OcrComponentError("OCR 组件清单缺少文件大小", "MANIFEST_INVALID")
@@ -100,7 +124,8 @@ def verify_manifest_signature(manifest: Mapping[str, object], public_keys: Mappi
         raise OcrComponentError("OCR 组件签名密钥不受信任", "SIGNING_KEY_UNKNOWN")
     try:
         Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key)).verify(
-            base64.b64decode(str(manifest["signature"])), canonical_manifest_bytes(manifest)
+            base64.b64decode(str(manifest["signature"])),
+            canonical_manifest_bytes(manifest),
         )
     except (ValueError, InvalidSignature) as exc:
         raise OcrComponentError("OCR 组件签名校验失败", "SIGNATURE_INVALID") from exc
@@ -118,7 +143,9 @@ class OcrComponentManager:
         self.root = Path(root) if root else default_component_root()
         self.current_file = self.root / "current.json"
         self.previous_file = self.root / "previous.json"
-        self.public_keys = dict(public_keys if public_keys is not None else OCR_COMPONENT_PUBLIC_KEYS)
+        self.public_keys = dict(
+            public_keys if public_keys is not None else OCR_COMPONENT_PUBLIC_KEYS
+        )
         self._health_check = health_check or self._default_health_check
 
     def status(self) -> OcrComponentInfo:
@@ -142,14 +169,20 @@ class OcrComponentManager:
             with urllib.request.urlopen(manifest_url, timeout=20) as response:
                 manifest = json.loads(response.read().decode("utf-8"))
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            raise OcrComponentError("无法获取 OCR 组件清单", "MANIFEST_DOWNLOAD_FAILED") from exc
+            raise OcrComponentError(
+                "无法获取 OCR 组件清单", "MANIFEST_DOWNLOAD_FAILED"
+            ) from exc
         verify_manifest_signature(manifest, self.public_keys)
         self._verify_minimum_app_version(str(manifest["min_app_version"]))
 
         with tempfile.TemporaryDirectory(prefix="markitdown-ocr-") as temp_dir:
             archive = Path(temp_dir) / "ocr-engine.zip"
-            self._download(manifest["url"], archive, progress, int(manifest["size_bytes"]))
-            return self.install_archive(archive, manifest["version"], manifest["sha256"])
+            self._download(
+                manifest["url"], archive, progress, int(manifest["size_bytes"])
+            )
+            return self.install_archive(
+                archive, manifest["version"], manifest["sha256"]
+            )
 
     def install_archive(
         self,
@@ -191,11 +224,19 @@ class OcrComponentManager:
             replacement.replace(target)
             current_temp = self.root / ".current.new"
             current_temp.write_text(
-                json.dumps({"version": version, "sha256": expected_sha256}, ensure_ascii=False), encoding="utf-8"
+                json.dumps(
+                    {"version": version, "sha256": expected_sha256}, ensure_ascii=False
+                ),
+                encoding="utf-8",
             )
             current_temp.replace(self.current_file)
             if previous.exists():
-                self.previous_file.write_text(json.dumps({"version": previous.name.lstrip(".").removesuffix(".previous")}), encoding="utf-8")
+                self.previous_file.write_text(
+                    json.dumps(
+                        {"version": previous.name.lstrip(".").removesuffix(".previous")}
+                    ),
+                    encoding="utf-8",
+                )
             return OcrComponentInfo(True, version, target / "ocr-engine.exe")
         except Exception:
             if moved_previous and previous.exists():
@@ -207,12 +248,16 @@ class OcrComponentManager:
             if staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
 
-    def install_offline_archive(self, archive_path: str | Path, manifest_path: str | Path) -> OcrComponentInfo:
+    def install_offline_archive(
+        self, archive_path: str | Path, manifest_path: str | Path
+    ) -> OcrComponentInfo:
         try:
             manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
             verify_manifest_signature(manifest, self.public_keys)
             self._verify_minimum_app_version(str(manifest["min_app_version"]))
-            return self.install_archive(archive_path, manifest["version"], manifest["sha256"])
+            return self.install_archive(
+                archive_path, manifest["version"], manifest["sha256"]
+            )
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise OcrComponentError("离线组件清单无效", "MANIFEST_INVALID") from exc
 
@@ -220,17 +265,24 @@ class OcrComponentManager:
     def _verify_minimum_app_version(minimum: str) -> None:
         try:
             from app.__about__ import __version__
+
             if Version(__version__) < Version(minimum):
                 raise OcrComponentError("桌面程序版本过低，无法安装该 OCR 组件", "APP_VERSION_TOO_OLD")
         except InvalidVersion as exc:
             raise OcrComponentError("OCR 组件最低版本字段无效", "MANIFEST_INVALID") from exc
 
     def _download(
-        self, url: str, target: Path, progress: Callable[[float], None] | None, expected_size: int
+        self,
+        url: str,
+        target: Path,
+        progress: Callable[[float], None] | None,
+        expected_size: int,
     ) -> None:
         request = urllib.request.Request(url, headers={"User-Agent": "MarkItDownDesk"})
         try:
-            with urllib.request.urlopen(request, timeout=30) as response, open(target, "wb") as stream:
+            with urllib.request.urlopen(request, timeout=30) as response, open(
+                target, "wb"
+            ) as stream:
                 total = int(response.headers.get("Content-Length", "0") or 0)
                 done = 0
                 while chunk := response.read(1024 * 1024):
@@ -249,13 +301,26 @@ class OcrComponentManager:
             raise OcrComponentError("OCR 组件中缺少 ocr-engine.exe", "ENGINE_MISSING")
         try:
             completed = subprocess.run(
-                [str(engine), "--health"], capture_output=True, text=True, encoding="utf-8", timeout=30,
+                [str(engine), "--health"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
                 cwd=str(engine.parent),
             )
             event = parse_jsonl_event(completed.stdout.strip().splitlines()[-1])
-            if completed.returncode != 0 or event.get("type") != "health" or event.get("status") != "ok":
+            if (
+                completed.returncode != 0
+                or event.get("type") != "health"
+                or event.get("status") != "ok"
+            ):
                 raise OcrComponentError("OCR 组件健康检查失败", "ENGINE_HEALTH_FAILED")
-        except (OSError, subprocess.TimeoutExpired, IndexError, OcrComponentError) as exc:
+        except (
+            OSError,
+            subprocess.TimeoutExpired,
+            IndexError,
+            OcrComponentError,
+        ) as exc:
             if isinstance(exc, OcrComponentError):
                 raise
             raise OcrComponentError("OCR 组件健康检查失败", "ENGINE_HEALTH_FAILED") from exc
@@ -283,8 +348,11 @@ class OcrEngineClient:
     """Runs the standalone engine and exposes its line-delimited JSON events."""
 
     def __init__(
-        self, engine_path: str | Path, timeout_seconds: int = 300,
-        request_id: str | None = None, progress_callback: Callable[[dict], None] | None = None,
+        self,
+        engine_path: str | Path,
+        timeout_seconds: int = 300,
+        request_id: str | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.engine_path = Path(engine_path)
         self.timeout_seconds = timeout_seconds
@@ -309,8 +377,13 @@ class OcrEngineClient:
         with stderr:
             try:
                 process = subprocess.Popen(
-                    command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr,
-                    text=True, encoding="utf-8", cwd=str(self.engine_path.parent),
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=stderr,
+                    text=True,
+                    encoding="utf-8",
+                    cwd=str(self.engine_path.parent),
                 )
                 self._active_process = process
             except OSError as exc:
@@ -324,7 +397,9 @@ class OcrEngineClient:
                     if line.strip():
                         event = parse_jsonl_event(line)
                         if event.get("request_id") != request_id:
-                            raise OcrComponentError("OCR 引擎返回了不匹配的 request_id", "REQUEST_ID_MISMATCH")
+                            raise OcrComponentError(
+                                "OCR 引擎返回了不匹配的 request_id", "REQUEST_ID_MISMATCH"
+                            )
                         if self.progress_callback and event.get("type") == "progress":
                             self.progress_callback(event)
                         yield event
@@ -337,9 +412,13 @@ class OcrEngineClient:
                 self._active_process = None
             if return_code != 0:
                 stderr.seek(0)
-                raise OcrComponentError(f"OCR 引擎异常退出: {stderr.read()[:300]}", "ENGINE_RUNTIME_ERROR")
+                raise OcrComponentError(
+                    f"OCR 引擎异常退出: {stderr.read()[:300]}", "ENGINE_RUNTIME_ERROR"
+                )
 
-    def recognise(self, file_path: str, file_type: str, pages: list[int] | None = None) -> dict:
+    def recognise(
+        self, file_path: str, file_type: str, pages: list[int] | None = None
+    ) -> dict:
         result: dict | None = None
         for event in self.run(
             {
@@ -352,7 +431,10 @@ class OcrEngineClient:
             }
         ):
             if event["type"] == "error":
-                raise OcrComponentError(str(event.get("message", "OCR 识别失败")), str(event.get("code", "ENGINE_RUNTIME_ERROR")))
+                raise OcrComponentError(
+                    str(event.get("message", "OCR 识别失败")),
+                    str(event.get("code", "ENGINE_RUNTIME_ERROR")),
+                )
             if event["type"] == "result":
                 result = event
         if result is None:

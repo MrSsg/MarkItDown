@@ -11,9 +11,24 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Slot, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDockWidget, QFileDialog, QFrame,
-    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QDialogButtonBox, QPlainTextEdit, QSplitter, QTextBrowser, QVBoxLayout, QWidget,
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QDockWidget,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QDialogButtonBox,
+    QPlainTextEdit,
+    QSplitter,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.__about__ import __app_name__, __version__
@@ -188,7 +203,14 @@ class MainWindow(QMainWindow):
         self._export_all_btn = QPushButton("导出全部")
         self._pin_btn = QPushButton("固定结果")
         self._failure_btn = QPushButton("失败日志")
-        for button in (self._view_mode_btn, self._copy_btn, self._save_btn, self._export_all_btn, self._pin_btn, self._failure_btn):
+        for button in (
+            self._view_mode_btn,
+            self._copy_btn,
+            self._save_btn,
+            self._export_all_btn,
+            self._pin_btn,
+            self._failure_btn,
+        ):
             button.setObjectName("secondaryBtn")
             toolbar.addWidget(button)
         toolbar.addStretch()
@@ -244,6 +266,7 @@ class MainWindow(QMainWindow):
 
     def _open_ocr_install(self) -> None:
         from .dialogs import OcrInstallDialog
+
         OcrInstallDialog(self._ocr_manager, self).exec()
         self._refresh_ocr_status()
 
@@ -266,7 +289,9 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        paths = [
+            url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()
+        ]
         if paths:
             self._on_files_dropped(paths)
             event.acceptProposedAction()
@@ -279,14 +304,25 @@ class MainWindow(QMainWindow):
         self._jobs.enqueue(paths)
         self._refresh_jobs()
         rejected = len(self._jobs.failures)
-        self._status.setText(f"已创建 {len(self._jobs.items)} 个任务" + (f"，{rejected} 个预检失败" if rejected else ""))
+        self._status.setText(
+            f"已创建 {len(self._jobs.items)} 个任务"
+            + (f"，{rejected} 个预检失败" if rejected else "")
+        )
 
     def _refresh_jobs(self) -> None:
         self._job_list.refresh(self._jobs.items)
-        self._retry_btn.setEnabled(bool(self._jobs.failures) and self._jobs.state.value not in ("Running", "Cancelling", "TimedOutWaiting"))
+        self._retry_btn.setEnabled(
+            bool(self._jobs.failures)
+            and self._jobs.state.value
+            not in ("Running", "Cancelling", "TimedOutWaiting")
+        )
         self._failure_btn.setEnabled(bool(self._jobs.failures))
-        self._start_btn.setEnabled(bool(self._jobs.items) and self._jobs.state.value in ("Idle", "Completed"))
-        self._cancel_btn.setEnabled(self._jobs.state.value in ("Running", "TimedOutWaiting"))
+        self._start_btn.setEnabled(
+            bool(self._jobs.items) and self._jobs.state.value in ("Idle", "Completed")
+        )
+        self._cancel_btn.setEnabled(
+            self._jobs.state.value in ("Running", "TimedOutWaiting")
+        )
 
     def _start_convert(self) -> None:
         item = self._jobs.start()
@@ -302,12 +338,19 @@ class MainWindow(QMainWindow):
         self._detail_meta.setText("正在转换…")
         self._progress.setRange(0, 0)
         if not self._worker.start_convert(
-            item.file_path, self._ocr_cb.isChecked(), self._ocr_manager, request_id=item.request_id
+            item.file_path,
+            self._ocr_cb.isChecked(),
+            self._ocr_manager,
+            request_id=item.request_id,
         ):
             self._jobs.fail_current(JobFailure("scheduler", "WORKER_BUSY", "转换器仍在运行"))
             self._start_convert()
             return
-        timeout_ms = 5 * 60 * 1000 if self._ocr_cb.isChecked() and PathSuffix.is_ocr_file(item.file_path) else 10 * 60 * 1000
+        timeout_ms = (
+            5 * 60 * 1000
+            if self._ocr_cb.isChecked() and PathSuffix.is_ocr_file(item.file_path)
+            else 10 * 60 * 1000
+        )
         self._timeout.start(timeout_ms)
         self._refresh_jobs()
 
@@ -349,8 +392,10 @@ class MainWindow(QMainWindow):
         self._timeout.stop()
         payload = error if isinstance(error, dict) else {}
         failure = JobFailure(
-            str(payload.get("stage", "conversion")), str(payload.get("code", "CONVERSION_FAILED")),
-            str(payload.get("message", "转换失败")), str(payload.get("detail", error)),
+            str(payload.get("stage", "conversion")),
+            str(payload.get("code", "CONVERSION_FAILED")),
+            str(payload.get("message", "转换失败")),
+            str(payload.get("detail", error)),
         )
         next_item = self._jobs.fail_current(failure)
         self._status.setText(f"转换失败：{os.path.basename(file_path)}")
@@ -387,7 +432,9 @@ class MainWindow(QMainWindow):
         self._progress.setRange(0, 100)
         self._progress.setValue(100 if self._jobs.completed_count else 0)
         if self._jobs.failures:
-            self._status.setText(f"批次完成：成功 {self._jobs.completed_count}，失败 {len(self._jobs.failures)}")
+            self._status.setText(
+                f"批次完成：成功 {self._jobs.completed_count}，失败 {len(self._jobs.failures)}"
+            )
         else:
             self._status.setText(f"批次完成：成功 {self._jobs.completed_count}")
         self._refresh_jobs()
@@ -403,10 +450,14 @@ class MainWindow(QMainWindow):
         for item in self._jobs.failures:
             failure = item.failure
             if failure:
-                entries.append(f"{item.file_name}\n[{failure.code}] {failure.message}\n{failure.detail}".strip())
+                entries.append(
+                    f"{item.file_name}\n[{failure.code}] {failure.message}\n{failure.detail}".strip()
+                )
         if not entries:
             return
-        log_entries = [self._jobs.store.read_log(item.log_path) for item in self._jobs.failures]
+        log_entries = [
+            self._jobs.store.read_log(item.log_path) for item in self._jobs.failures
+        ]
         dialog = QDialog(self)
         dialog.setWindowTitle("批量转换失败日志")
         dialog.resize(720, 480)
@@ -414,21 +465,29 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel(f"共 {len(entries)} 个任务失败"))
         editor = QPlainTextEdit()
         editor.setReadOnly(True)
-        editor.setPlainText("\n\n".join(entries + [entry for entry in log_entries if entry]))
+        editor.setPlainText(
+            "\n\n".join(entries + [entry for entry in log_entries if entry])
+        )
         layout.addWidget(editor, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         copy_button = buttons.addButton("复制完整日志", QDialogButtonBox.ActionRole)
         open_button = buttons.addButton("打开日志目录", QDialogButtonBox.ActionRole)
-        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(editor.toPlainText()))
+        copy_button.clicked.connect(
+            lambda: QApplication.clipboard().setText(editor.toPlainText())
+        )
         open_button.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._jobs.store.logs_path)))
+            lambda: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(self._jobs.store.logs_path))
+            )
         )
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()
 
     def _on_job_selected(self, path: str) -> None:
-        item = next((value for value in self._jobs.items if value.file_path == path), None)
+        item = next(
+            (value for value in self._jobs.items if value.file_path == path), None
+        )
         if not item:
             return
         self._current_file = path
@@ -444,7 +503,9 @@ class MainWindow(QMainWindow):
             self._preview.clear()
 
     def _show_markdown(self, item: JobItem, markdown: str) -> None:
-        self._detail_meta.setText(f"已转换，结果仅在本次会话中缓存：{item.result_path.name if item.result_path else ''}")
+        self._detail_meta.setText(
+            f"已转换，结果仅在本次会话中缓存：{item.result_path.name if item.result_path else ''}"
+        )
         if self._view_source:
             self._preview.setPlainText(markdown)
         else:
@@ -459,7 +520,10 @@ class MainWindow(QMainWindow):
     def _render_markdown(self, text: str) -> None:
         try:
             import markdown as markdown_lib
-            body = markdown_lib.markdown(text, extensions=["fenced_code", "tables", "nl2br"])
+
+            body = markdown_lib.markdown(
+                text, extensions=["fenced_code", "tables", "nl2br"]
+            )
         except ImportError:
             body = f"<pre>{html.escape(text)}</pre>"
         colors = self._theme.colors
@@ -479,7 +543,9 @@ class MainWindow(QMainWindow):
                 return
             success = 0
             for item in available:
-                target = os.path.join(folder, os.path.splitext(item.file_name)[0] + ".md")
+                target = os.path.join(
+                    folder, os.path.splitext(item.file_name)[0] + ".md"
+                )
                 try:
                     PathLike.write(target, self._jobs.store.read(item.result_path))
                     self.history_mgr.mark_export(item.file_path, target)
@@ -490,15 +556,27 @@ class MainWindow(QMainWindow):
             return
         if not self._current_markdown:
             return
-        name = os.path.splitext(os.path.basename(self._current_file or "output"))[0] + ".md"
-        target, _ = QFileDialog.getSaveFileName(self, "导出 Markdown", name, "Markdown (*.md)")
+        name = (
+            os.path.splitext(os.path.basename(self._current_file or "output"))[0]
+            + ".md"
+        )
+        target, _ = QFileDialog.getSaveFileName(
+            self, "导出 Markdown", name, "Markdown (*.md)"
+        )
         if target:
             PathLike.write(target, self._current_markdown)
             self.history_mgr.mark_export(self._current_file or "", target)
             self._status.setText(f"已导出：{target}")
 
     def _pin_current_result(self) -> None:
-        item = next((entry for entry in self._jobs.items if entry.file_path == self._current_file), None)
+        item = next(
+            (
+                entry
+                for entry in self._jobs.items
+                if entry.file_path == self._current_file
+            ),
+            None,
+        )
         if item is None or item.result_path is None:
             self._status.setText("当前没有可固定的转换结果")
             return
@@ -516,6 +594,7 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         from .dialogs import SettingsDialog
+
         SettingsDialog(self._settings, self._theme, self._float_win, self).exec()
         self._jobs.limits = self._resource_limits()
 
@@ -527,7 +606,9 @@ class MainWindow(QMainWindow):
             )
         # QListWidget.addItem returns None; attach paths in a second pass.
         for index, entry in enumerate(self.history_mgr.entries):
-            self._hist_panel.list_widget.item(index).setData(Qt.UserRole, entry.file_path)
+            self._hist_panel.list_widget.item(index).setData(
+                Qt.UserRole, entry.file_path
+            )
         self._hist_panel.set_count(len(self.history_mgr.entries))
 
     def _clear_history(self) -> None:
