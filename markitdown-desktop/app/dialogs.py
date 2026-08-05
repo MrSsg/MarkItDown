@@ -6,13 +6,13 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QPushButton, QFileDialog, QDialogButtonBox, QRadioButton,
     QCheckBox, QSpinBox, QMessageBox, QProgressBar)
 
-from .ocr import OcrComponentError
+from .ocr import OcrComponentError, OcrComponentManager
 
 
 class _OcrInstallThread(QThread):
     progress = Signal(int)
     complete = Signal(object)
-    failed = Signal(str)
+    failed = Signal(object)
 
     def __init__(self, manager):
         super().__init__()
@@ -25,7 +25,7 @@ class _OcrInstallThread(QThread):
             )
             self.complete.emit(info)
         except OcrComponentError as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit({"code": exc.code, "message": str(exc)})
 
 
 class OcrInstallDialog(QDialog):
@@ -77,7 +77,7 @@ class OcrInstallDialog(QDialog):
         try:
             self._installed(self._manager.install_offline_archive(archive, manifest))
         except OcrComponentError as exc:
-            self._failed(str(exc))
+            self._failed({"code": exc.code, "message": str(exc)})
 
     def _installed(self, info):
         self._progress.setValue(100)
@@ -85,8 +85,9 @@ class OcrInstallDialog(QDialog):
         self._download.setEnabled(True)
         self._import.setEnabled(True)
 
-    def _failed(self, message):
-        self._status.setText(f"安装失败：{message}")
+    def _failed(self, error):
+        payload = error if isinstance(error, dict) else {"code": "OCR_COMPONENT_ERROR", "message": str(error)}
+        self._status.setText(f"安装失败 [{payload['code']}]：{payload['message']}")
         self._download.setEnabled(True)
         self._import.setEnabled(True)
 
@@ -173,8 +174,19 @@ class SettingsDialog(QDialog):
         from app.__about__ import __version__ as _av, __app_name__ as _an
         self._about_app_lbl = QLabel(f"<b>{_an}</b> v{_av}")
         self._about_kernel_lbl = QLabel("转换内核随完整桌面发行版更新")
+        ocr_info = OcrComponentManager().status()
+        self._about_ocr_lbl = QLabel(
+            f"离线 OCR：已安装 v{ocr_info.version}" if ocr_info.installed else "离线 OCR：未安装"
+        )
+        self._about_links_lbl = QLabel(
+            '<a href="https://github.com/MrSsg/MarkItDown/releases">发行版</a>  ·  '
+            '<a href="https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE">PaddleOCR Apache-2.0</a>'
+        )
+        self._about_links_lbl.setOpenExternalLinks(True)
         about_layout.addWidget(self._about_app_lbl)
         about_layout.addWidget(self._about_kernel_lbl)
+        about_layout.addWidget(self._about_ocr_lbl)
+        about_layout.addWidget(self._about_links_lbl)
         l.addWidget(about_group)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

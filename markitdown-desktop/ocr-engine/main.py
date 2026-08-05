@@ -15,6 +15,18 @@ def emit(event_type: str, request_id: str = "", **data) -> None:
     print(json.dumps({"type": event_type, "request_id": request_id, **data}, ensure_ascii=False), flush=True)
 
 
+def error_code(exc: Exception) -> str:
+    if isinstance(exc, FileNotFoundError):
+        return "INPUT_NOT_FOUND"
+    if isinstance(exc, ValueError):
+        return "UNSUPPORTED_FILE_TYPE"
+    if isinstance(exc, ImportError):
+        return "MODEL_UNAVAILABLE"
+    if isinstance(exc, TimeoutError):
+        return "OCR_TIMEOUT"
+    return "ENGINE_RUNTIME_ERROR"
+
+
 def ocr_image(ocr, image) -> str:
     if isinstance(image, bytes):
         from PIL import Image
@@ -40,23 +52,22 @@ def handle(request: dict) -> None:
         # Keep all model files inside the optional component. This prevents a
         # frozen engine from downloading models into the user's profile.
         os.environ["PADDLE_PDX_CACHE_HOME"] = str(bundled_models)
-    from paddleocr import PaddleOCR
-
     request_id = str(request.get("request_id", ""))
     input_path = Path(request["input_path"])
     if not input_path.is_file():
         raise FileNotFoundError("输入文件不存在")
+    file_type = request.get("file_type")
+    if file_type not in {"image", "pdf"}:
+        raise ValueError("不支持的 OCR 文件类型")
+    from paddleocr import PaddleOCR
+
     # Paddle 3.3's oneDNN backend fails for the PP-OCRv6 CPU graph on some
     # Windows hosts. The standard CPU backend is slower but consistently works.
     ocr = PaddleOCR(lang="ch", enable_mkldnn=False)
-    file_type = request.get("file_type")
     if file_type == "image":
         emit("progress", request_id, current=1, total=1)
         emit("result", request_id, pages=[{"number": 1, "markdown": ocr_image(ocr, str(input_path))}])
         return
-    if file_type != "pdf":
-        raise ValueError("不支持的 OCR 文件类型")
-
     import fitz
 
     requested_pages = {int(page) for page in request.get("pages", [])}
@@ -73,6 +84,7 @@ def handle(request: dict) -> None:
 
 
 def main() -> int:
+    request_id = ""
     try:
         if "--health" in sys.argv:
             engine_dir = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
@@ -85,12 +97,16 @@ def main() -> int:
             emit("health", status="ok", protocol_version=1)
             return 0
         request = json.loads(sys.stdin.readline())
+        if not isinstance(request, dict):
+            raise ValueError("请求必须是 JSON 对象")
+        request_id = str(request.get("request_id", ""))
         handle(request)
         return 0
     except Exception as exc:
         emit(
             "error",
-            code="OCR_ENGINE_ERROR",
+            request_id,
+            code=error_code(exc),
             message=str(exc)[:500],
             detail=traceback.format_exc()[-4000:],
         )

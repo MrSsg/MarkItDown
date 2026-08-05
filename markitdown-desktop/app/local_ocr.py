@@ -8,7 +8,7 @@ from typing import Any, BinaryIO
 
 from markitdown import DocumentConverter, DocumentConverterResult, StreamInfo
 from markitdown.converters._image_converter import ImageConverter
-from markitdown.converters._pdf_converter import _extract_form_content_from_words
+from markitdown.converters._pdf_converter import PdfConverter, _extract_form_content_from_words
 
 from .ocr import OcrEngineClient, count_visible_characters
 
@@ -34,9 +34,12 @@ class LocalOcrImageConverter(DocumentConverter):
 class LocalOcrPdfConverter(DocumentConverter):
     _extension = ".pdf"
 
-    def __init__(self, engine: OcrEngineClient, min_native_characters: int = 32) -> None:
+    def __init__(
+        self, engine: OcrEngineClient, min_native_characters: int = 32, fallback_converter: DocumentConverter | None = None
+    ) -> None:
         self._engine = engine
         self._min_native_characters = min_native_characters
+        self._fallback = fallback_converter or PdfConverter()
 
     def accepts(self, file_stream: BinaryIO, stream_info: StreamInfo, **kwargs: Any) -> bool:
         return (stream_info.extension or "").lower() == self._extension
@@ -47,24 +50,24 @@ class LocalOcrPdfConverter(DocumentConverter):
         file_path = stream_info.local_path or ""
         if not file_path:
             raise ValueError("本地 OCR 仅支持本地 PDF 文件")
-        chunks: list[str] = []
+        pdf_data = file_stream.read()
+        base = self._fallback.convert(io.BytesIO(pdf_data), stream_info, **kwargs).markdown.strip()
         ocr_pages: list[int] = []
-        with pdfplumber.open(io.BytesIO(file_stream.read())) as pdf:
+        with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
             for index, page in enumerate(pdf.pages, start=1):
                 text = _extract_form_content_from_words(page) or (page.extract_text() or "")
                 if count_visible_characters(text) < self._min_native_characters:
                     ocr_pages.append(index)
-                    chunks.append("")
-                else:
-                    chunks.append(text.strip())
                 page.close()
+        sections = [base] if base else []
         if ocr_pages:
             result = self._engine.recognise(file_path, "pdf", ocr_pages)
             recognised = {int(page["number"]): page.get("markdown", "") for page in result.get("pages", [])}
+            ocr_sections = ["## OCR 文本"]
             for page_number in ocr_pages:
-                chunks[page_number - 1] = recognised.get(page_number, "")
-        output = []
-        for number, text in enumerate(chunks, start=1):
-            if text.strip():
-                output.append(f"<!-- page {number} -->\n{text.strip()}")
-        return DocumentConverterResult(markdown="\n\n".join(output))
+                text = recognised.get(page_number, "").strip()
+                if text:
+                    ocr_sections.append(f"### 第 {page_number} 页\n{text}")
+            if len(ocr_sections) > 1:
+                sections.append("\n\n".join(ocr_sections))
+        return DocumentConverterResult(markdown="\n\n".join(sections))

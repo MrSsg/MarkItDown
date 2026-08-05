@@ -9,7 +9,7 @@ pwsh ./build.ps1
 首次发布先生成密钥：
 
 ```powershell
-py -3.12 ./generate_signing_key.py --public-key-output ../app/ocr_public_keys.json
+.\.venv\Scripts\python.exe .\generate_signing_key.py --public-key-output ..\app\ocr_public_keys.json
 ```
 
 将脚本仅输出到终端的私钥值保存为 GitHub Actions Secret `MARKITDOWN_OCR_SIGNING_KEY`，然后用该公钥文件构建桌面 EXE：

@@ -86,9 +86,14 @@ class OcrComponentManagerTests(unittest.TestCase):
 
 class OcrProtocolTests(unittest.TestCase):
     def test_protocol_requires_type(self):
-        self.assertEqual(parse_jsonl_event('{"type":"progress","current":1}')["type"], "progress")
+        self.assertEqual(parse_jsonl_event('{"type":"progress","request_id":"a","current":1}')["type"], "progress")
         with self.assertRaises(OcrComponentError):
             parse_jsonl_event('{"current":1}')
+
+    def test_protocol_requires_request_id_for_engine_events(self):
+        with self.assertRaisesRegex(OcrComponentError, "request_id") as raised:
+            parse_jsonl_event('{"type":"error","code":"INPUT_NOT_FOUND"}')
+        self.assertEqual("PROTOCOL_INVALID", raised.exception.code)
 
     def test_low_text_threshold_helper(self):
         self.assertEqual(count_visible_characters(" 中 文\nA "), 3)

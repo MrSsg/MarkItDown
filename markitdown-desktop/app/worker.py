@@ -5,13 +5,13 @@ import uuid
 from PySide6.QtCore import QObject, Signal, QThread
 
 from .local_ocr import LocalOcrImageConverter, LocalOcrPdfConverter
-from .ocr import OcrComponentManager, OcrEngineClient
+from .ocr import OcrComponentError, OcrComponentManager, OcrEngineClient
 
 class ConvertWorker(QObject):
     started = Signal(str, str)
-    progress = Signal(str)
+    progress = Signal(object)
     finished = Signal(str, str)
-    error = Signal(str, str)
+    error = Signal(object, str)
     ocr_unavailable = Signal(str)
 
     def __init__(self, parent=None):
@@ -49,13 +49,13 @@ class ConvertWorker(QObject):
         self._thread = None
         if thread is None:
             return
-        if thread.error_message is not None:
-            self.error.emit(thread.error_message, thread.file_path)
+        if thread.error_payload is not None:
+            self.error.emit(thread.error_payload, thread.file_path)
         else:
             self.finished.emit(thread.markdown or "", thread.file_path)
 
 class _ConvertThread(QThread):
-    progress = Signal(str)
+    progress = Signal(object)
 
     def __init__(self, file_path, engine_path=None, request_id=None):
         super().__init__()
@@ -64,7 +64,7 @@ class _ConvertThread(QThread):
         self._request_id = request_id
         self._ocr_engine = None
         self.markdown = None
-        self.error_message = None
+        self.error_payload = None
 
     @property
     def file_path(self):
@@ -83,11 +83,11 @@ class _ConvertThread(QThread):
             if self._engine_path:
                 def report(event):
                     if event.get("type") == "progress":
-                        current = event.get("current", 0)
-                        total = event.get("total", 0)
-                        page = event.get("page")
-                        suffix = f"，第 {page} 页" if page else ""
-                        self.progress.emit(f"OCR 识别中 {current}/{total}{suffix}")
+                        self.progress.emit({
+                            "phase": "ocr", "request_id": self._request_id,
+                            "current": int(event.get("current", 0)),
+                            "total": int(event.get("total", 0)), "page": event.get("page"),
+                        })
                 engine = OcrEngineClient(
                     self._engine_path, request_id=self._request_id, progress_callback=report
                 )
@@ -97,7 +97,15 @@ class _ConvertThread(QThread):
             result = md.convert(self._file_path)
             content = result.text_content
             self.markdown = content
-        except ImportError as e:
-            self.error_message = str(e)
+        except OcrComponentError as exc:
+            self.error_payload = {
+                "stage": "ocr", "code": exc.code, "message": str(exc), "detail": traceback.format_exc(),
+            }
+        except ImportError as exc:
+            self.error_payload = {
+                "stage": "conversion", "code": "DEPENDENCY_MISSING", "message": str(exc), "detail": traceback.format_exc(),
+            }
         except Exception:
-            self.error_message = traceback.format_exc()
+            self.error_payload = {
+                "stage": "conversion", "code": "CONVERSION_FAILED", "message": "转换失败", "detail": traceback.format_exc(),
+            }

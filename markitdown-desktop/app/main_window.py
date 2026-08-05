@@ -8,12 +8,12 @@ import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Slot, QTimer
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, Slot, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDockWidget, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QSplitter, QTextBrowser, QVBoxLayout, QWidget,
+    QDialogButtonBox, QPlainTextEdit, QSplitter, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from app.__about__ import __app_name__, __version__
@@ -186,8 +186,9 @@ class MainWindow(QMainWindow):
         self._copy_btn = QPushButton("复制")
         self._save_btn = QPushButton("导出当前")
         self._export_all_btn = QPushButton("导出全部")
+        self._pin_btn = QPushButton("固定结果")
         self._failure_btn = QPushButton("失败日志")
-        for button in (self._view_mode_btn, self._copy_btn, self._save_btn, self._export_all_btn, self._failure_btn):
+        for button in (self._view_mode_btn, self._copy_btn, self._save_btn, self._export_all_btn, self._pin_btn, self._failure_btn):
             button.setObjectName("secondaryBtn")
             toolbar.addWidget(button)
         toolbar.addStretch()
@@ -214,6 +215,7 @@ class MainWindow(QMainWindow):
         self._copy_btn.clicked.connect(self._copy_to_clipboard)
         self._save_btn.clicked.connect(self._save_file)
         self._export_all_btn.clicked.connect(lambda: self._save_file(batch=True))
+        self._pin_btn.clicked.connect(self._pin_current_result)
         self._hist_panel.clear_btn.clicked.connect(self._clear_history)
         self._hist_panel.list_widget.itemClicked.connect(self._on_history_clicked)
         self._job_list.item_selected.connect(self._on_job_selected)
@@ -299,7 +301,9 @@ class MainWindow(QMainWindow):
         self._detail_title.setText(item.file_name)
         self._detail_meta.setText("正在转换…")
         self._progress.setRange(0, 0)
-        if not self._worker.start_convert(item.file_path, self._ocr_cb.isChecked(), self._ocr_manager):
+        if not self._worker.start_convert(
+            item.file_path, self._ocr_cb.isChecked(), self._ocr_manager, request_id=item.request_id
+        ):
             self._jobs.fail_current(JobFailure("scheduler", "WORKER_BUSY", "转换器仍在运行"))
             self._start_convert()
             return
@@ -340,10 +344,15 @@ class MainWindow(QMainWindow):
         else:
             self._finish_queue()
 
-    @Slot(str, str)
-    def _on_convert_error(self, error: str, file_path: str) -> None:
+    @Slot(object, str)
+    def _on_convert_error(self, error: object, file_path: str) -> None:
         self._timeout.stop()
-        next_item = self._jobs.fail_current(JobFailure("conversion", "CONVERSION_FAILED", "转换失败", error))
+        payload = error if isinstance(error, dict) else {}
+        failure = JobFailure(
+            str(payload.get("stage", "conversion")), str(payload.get("code", "CONVERSION_FAILED")),
+            str(payload.get("message", "转换失败")), str(payload.get("detail", error)),
+        )
+        next_item = self._jobs.fail_current(failure)
         self._status.setText(f"转换失败：{os.path.basename(file_path)}")
         self._refresh_jobs()
         if next_item:
@@ -355,10 +364,24 @@ class MainWindow(QMainWindow):
     def _on_convert_started(self, _path: str, name: str) -> None:
         self._status.setText(f"正在转换：{name}")
 
-    @Slot(str)
-    def _on_convert_progress(self, message: str) -> None:
-        self._status.setText(message)
-        self._progress.setRange(0, 0)
+    @Slot(object)
+    def _on_convert_progress(self, event: object) -> None:
+        if not isinstance(event, dict):
+            self._status.setText(str(event))
+            self._progress.setRange(0, 0)
+            return
+        current = int(event.get("current", 0))
+        total = int(event.get("total", 0))
+        page = event.get("page")
+        terminal = {"success", "error", "cancelled"}
+        completed = sum(item.state in terminal for item in self._jobs.items)
+        fraction = current / total if total else 0.0
+        percent = round(100 * (completed + fraction) / max(len(self._jobs.items), 1))
+        remaining = sum(item.state == "queued" for item in self._jobs.items)
+        suffix = f"，第 {page} 页" if page else ""
+        self._progress.setRange(0, 100)
+        self._progress.setValue(percent)
+        self._status.setText(f"OCR 识别中 {current}/{total}{suffix}，剩余 {remaining} 项")
 
     def _finish_queue(self) -> None:
         self._progress.setRange(0, 100)
@@ -383,11 +406,25 @@ class MainWindow(QMainWindow):
                 entries.append(f"{item.file_name}\n[{failure.code}] {failure.message}\n{failure.detail}".strip())
         if not entries:
             return
-        dialog = QMessageBox(self)
+        log_entries = [self._jobs.store.read_log(item.log_path) for item in self._jobs.failures]
+        dialog = QDialog(self)
         dialog.setWindowTitle("批量转换失败日志")
-        dialog.setIcon(QMessageBox.Warning)
-        dialog.setText(f"共 {len(entries)} 个任务失败")
-        dialog.setDetailedText("\n\n".join(entries))
+        dialog.resize(720, 480)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"共 {len(entries)} 个任务失败"))
+        editor = QPlainTextEdit()
+        editor.setReadOnly(True)
+        editor.setPlainText("\n\n".join(entries + [entry for entry in log_entries if entry]))
+        layout.addWidget(editor, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        copy_button = buttons.addButton("复制完整日志", QDialogButtonBox.ActionRole)
+        open_button = buttons.addButton("打开日志目录", QDialogButtonBox.ActionRole)
+        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(editor.toPlainText()))
+        open_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._jobs.store.logs_path)))
+        )
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
         dialog.exec()
 
     def _on_job_selected(self, path: str) -> None:
@@ -445,6 +482,7 @@ class MainWindow(QMainWindow):
                 target = os.path.join(folder, os.path.splitext(item.file_name)[0] + ".md")
                 try:
                     PathLike.write(target, self._jobs.store.read(item.result_path))
+                    self.history_mgr.mark_export(item.file_path, target)
                     success += 1
                 except OSError:
                     pass
@@ -456,7 +494,20 @@ class MainWindow(QMainWindow):
         target, _ = QFileDialog.getSaveFileName(self, "导出 Markdown", name, "Markdown (*.md)")
         if target:
             PathLike.write(target, self._current_markdown)
+            self.history_mgr.mark_export(self._current_file or "", target)
             self._status.setText(f"已导出：{target}")
+
+    def _pin_current_result(self) -> None:
+        item = next((entry for entry in self._jobs.items if entry.file_path == self._current_file), None)
+        if item is None or item.result_path is None:
+            self._status.setText("当前没有可固定的转换结果")
+            return
+        try:
+            item.pinned_path = self._jobs.store.pin(item.result_path, item.file_name)
+            self.history_mgr.mark_pinned(item.file_path, str(item.pinned_path))
+            self._status.setText(f"结果已固定：{item.pinned_path.name}")
+        except OSError as exc:
+            self._status.setText(f"固定结果失败：{exc}")
 
     def _copy_to_clipboard(self) -> None:
         if self._current_markdown:

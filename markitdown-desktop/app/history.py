@@ -17,6 +17,9 @@ class HistoryEntry:
     file_type: str
     timestamp: float
     output_preview: str = ""  # retained only for backwards-compatible reads
+    export_path: str = ""
+    exported_at: float | None = None
+    pinned_path: str = ""
 
 
 class HistoryManager:
@@ -50,13 +53,39 @@ class HistoryManager:
         self._entries.clear()
         self._save()
 
+    def mark_export(self, file_path: str, export_path: str) -> None:
+        for entry in self._entries:
+            if entry.file_path == file_path:
+                entry.export_path = export_path
+                entry.exported_at = time.time()
+                break
+        self._save()
+
+    def mark_pinned(self, file_path: str, pinned_path: str) -> None:
+        for entry in self._entries:
+            if entry.file_path == file_path:
+                entry.pinned_path = pinned_path
+                break
+        self._save()
+
     def _load(self) -> None:
         if not os.path.isfile(self._path):
             return
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._entries = [HistoryEntry(**item) for item in data[: self._max]]
+            migrated = False
+            self._entries = []
+            for item in data[: self._max]:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("output_preview"):
+                    migrated = True
+                item = dict(item)
+                item["output_preview"] = ""
+                self._entries.append(HistoryEntry(**item))
+            if migrated:
+                self._save()
         except (json.JSONDecodeError, TypeError, KeyError):
             self._entries = []
 

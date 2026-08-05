@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
@@ -63,6 +64,16 @@ class JobControllerTests(unittest.TestCase):
             large.write_text("small", encoding="utf-8")
             self.assertEqual(1, len(controller.retry_failures()))
 
+    def test_nested_zip_is_rejected_without_extraction(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "nested.zip"
+            with zipfile.ZipFile(archive, "w") as package:
+                package.writestr("inside.zip", b"not extracted")
+            controller = self._controller(root)
+            controller.enqueue([str(archive)])
+            self.assertEqual("ZIP_NESTED_ARCHIVE", controller.items[0].failure.code)
+
     def test_session_store_is_disk_backed_and_cleanup_removes_result(self):
         with tempfile.TemporaryDirectory() as temp:
             store = SessionStore(Path(temp) / "sessions")
@@ -70,6 +81,28 @@ class JobControllerTests(unittest.TestCase):
             self.assertEqual("markdown", store.read(result))
             store.cleanup()
             self.assertFalse(result.exists())
+
+    def test_pinned_result_survives_session_cleanup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SessionStore(Path(temp) / "sessions")
+            result = store.write("C:/source.txt", "markdown")
+            pinned = store.pin(result, "source.txt")
+            store.cleanup()
+            self.assertEqual("markdown", pinned.read_text(encoding="utf-8"))
+
+    def test_failures_are_written_to_session_log_with_request_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "broken.txt"
+            source.write_text("broken", encoding="utf-8")
+            controller = self._controller(root)
+            controller.enqueue([str(source)])
+            item = controller.start()
+            self.assertIsNotNone(item)
+            controller.fail_current(JobFailure("ocr", "INPUT_NOT_FOUND", "输入文件不存在", "detail"))
+            logged = controller.store.read_log(controller.items[0].log_path)
+            self.assertIn('"code": "INPUT_NOT_FOUND"', logged)
+            self.assertIn(controller.items[0].request_id, logged)
 
 
 class WorkerContractTests(unittest.TestCase):
