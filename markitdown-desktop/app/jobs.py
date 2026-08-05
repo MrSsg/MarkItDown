@@ -267,6 +267,14 @@ class JobController:
         current = self.current
         if not current:
             return None
+        if self.timed_out_path == current.file_path:
+            failure = JobFailure(
+                "conversion",
+                "CONVERSION_TIMEOUT",
+                "转换超过 10 分钟",
+                detail=failure.detail or failure.message,
+                retryable=True,
+            )
         current.state = "error"
         current.failure = failure
         self._record_failure(current)

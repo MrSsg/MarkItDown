@@ -300,7 +300,9 @@ class MainWindow(QMainWindow):
         if self._jobs.state.value in ("Running", "Cancelling", "TimedOutWaiting"):
             self._status.setText("当前批次正在运行，完成后再创建新任务")
             return
+        old_store = self._jobs.store
         self._jobs = JobController(self._resource_limits())
+        old_store.cleanup()
         self._jobs.enqueue(paths)
         self._refresh_jobs()
         rejected = len(self._jobs.failures)
@@ -429,6 +431,7 @@ class MainWindow(QMainWindow):
         self._status.setText(f"OCR 识别中 {current}/{total}{suffix}，剩余 {remaining} 项")
 
     def _finish_queue(self) -> None:
+        self._worker.close_ocr_engine()
         self._progress.setRange(0, 100)
         self._progress.setValue(100 if self._jobs.completed_count else 0)
         if self._jobs.failures:

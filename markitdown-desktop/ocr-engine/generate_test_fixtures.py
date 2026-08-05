@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import fitz
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -26,6 +27,16 @@ def main() -> None:
     painter.text((110, 180), TEXT, fill="#17233d", font=font)
     image.save(output / "ocr-chinese.jpg", quality=96)
     image.save(output / "ocr-scan.pdf", "PDF", resolution=150.0)
+
+    mixed = fitz.open()
+    native_page = mixed.new_page(width=595, height=842)
+    native_page.insert_text((72, 100), "NATIVE_PAGE_KEEP", fontsize=20)
+    scan_page = mixed.new_page(width=595, height=842)
+    scan_page.insert_image(
+        fitz.Rect(35, 210, 560, 375), filename=str(output / "ocr-chinese.jpg")
+    )
+    mixed.save(output / "ocr-mixed.pdf")
+    mixed.close()
 
 
 if __name__ == "__main__":

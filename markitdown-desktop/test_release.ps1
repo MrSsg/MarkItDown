@@ -28,8 +28,14 @@ foreach ($fixture in $fixtures) {
     }
     $content = Get-Content -LiteralPath $result -Raw
     Remove-Item -LiteralPath $result -Force
+    if ($process.ExitCode -ne 0) {
+        throw "发行版进程退出失败: $input (exit $($process.ExitCode))`n$content"
+    }
     if (-not $content.StartsWith("ok")) {
         throw "发行版转换失败: $input`n$content"
+    }
+    if (-not $content.Substring(2).Trim()) {
+        throw "发行版结果为空: $input"
     }
     if ($fixture.Expected -and -not $content.ToLowerInvariant().Contains($fixture.Expected.ToLowerInvariant())) {
         throw "发行版结果缺少预期文本 '$($fixture.Expected)': $input`n$content"

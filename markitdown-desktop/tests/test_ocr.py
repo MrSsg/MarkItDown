@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -11,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from app.ocr import (
     OcrComponentError,
     OcrComponentManager,
+    OcrEngineClient,
     canonical_manifest_bytes,
     count_visible_characters,
     parse_jsonl_event,
@@ -77,6 +79,18 @@ class OcrComponentManagerTests(unittest.TestCase):
             with self.assertRaises(OcrComponentError):
                 manager.install_archive(archive, "1.0.0", "0" * 64)
 
+    def test_rejects_invalid_component_version(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = self._archive(root, {"ocr-engine.exe": b"engine"})
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            manager = OcrComponentManager(
+                root / "components", self.public_keys, health_check=lambda _path: None
+            )
+            with self.assertRaises(OcrComponentError) as raised:
+                manager.install_archive(archive, "..", digest)
+            self.assertEqual("VERSION_INVALID", raised.exception.code)
+
     def test_rejects_archive_path_escape(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -97,6 +111,15 @@ class OcrComponentManagerTests(unittest.TestCase):
             with self.assertRaises(OcrComponentError):
                 verify_manifest_signature(manifest, self.public_keys)
 
+    def test_rejects_malformed_ed25519_material(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = self._archive(root, {"ocr-engine.exe": b"engine"})
+            manifest = self._manifest(archive)
+            with self.assertRaises(OcrComponentError) as raised:
+                verify_manifest_signature(manifest, {"test": "not-base64"})
+            self.assertEqual("SIGNATURE_INVALID", raised.exception.code)
+
 
 class OcrProtocolTests(unittest.TestCase):
     def test_protocol_requires_type(self):
@@ -116,6 +139,36 @@ class OcrProtocolTests(unittest.TestCase):
 
     def test_low_text_threshold_helper(self):
         self.assertEqual(count_visible_characters(" 中 文\nA "), 3)
+
+    def test_engine_client_reuses_jsonl_process(self):
+        script = """
+import json
+import sys
+
+count = 0
+for line in sys.stdin:
+    request = json.loads(line)
+    count += 1
+    request_id = request.get("request_id", "")
+    print(json.dumps({"type": "progress", "request_id": request_id, "current": 1, "total": 1}), flush=True)
+    print(json.dumps({"type": "result", "request_id": request_id, "pages": [{"number": 1, "markdown": f"run-{count}"}]}), flush=True)
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake = root / "fake_engine.py"
+            fake.write_text(script, encoding="utf-8")
+            client = OcrEngineClient(
+                fake,
+                launcher=[sys.executable, str(fake)],
+                timeout_seconds=10,
+            )
+            try:
+                first = client.recognise("first.png", "image", request_id="first")
+                second = client.recognise("second.png", "image", request_id="second")
+            finally:
+                client.close()
+            self.assertEqual("run-1", first["pages"][0]["markdown"])
+            self.assertEqual("run-2", second["pages"][0]["markdown"])
 
 
 if __name__ == "__main__":

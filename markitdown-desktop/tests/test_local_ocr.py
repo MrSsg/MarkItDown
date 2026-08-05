@@ -65,6 +65,15 @@ class LocalOcrPdfConverterTests(unittest.TestCase):
         self.assertIn("## OCR 文本", result.markdown)
         self.assertIn("扫描页识别结果", result.markdown)
 
+    def test_ocr_page_is_kept_in_native_page_order(self):
+        merged = LocalOcrPdfConverter._merge_pages(
+            ["原生第一页", "", "原生第三页"],
+            {2: "扫描第二页"},
+            [2],
+        )
+        self.assertLess(merged.index("原生第一页"), merged.index("扫描第二页"))
+        self.assertLess(merged.index("扫描第二页"), merged.index("原生第三页"))
+
 
 if __name__ == "__main__":
     unittest.main()

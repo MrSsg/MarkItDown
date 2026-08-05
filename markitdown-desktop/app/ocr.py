@@ -7,10 +7,14 @@ import base64
 import hashlib
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import uuid
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -123,11 +127,14 @@ def verify_manifest_signature(
     if not public_key:
         raise OcrComponentError("OCR 组件签名密钥不受信任", "SIGNING_KEY_UNKNOWN")
     try:
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key)).verify(
-            base64.b64decode(str(manifest["signature"])),
-            canonical_manifest_bytes(manifest),
+        public_bytes = base64.b64decode(public_key, validate=True)
+        signature_bytes = base64.b64decode(str(manifest["signature"]), validate=True)
+        if len(public_bytes) != 32 or len(signature_bytes) != 64:
+            raise ValueError("Ed25519 密钥或签名长度错误")
+        Ed25519PublicKey.from_public_bytes(public_bytes).verify(
+            signature_bytes, canonical_manifest_bytes(manifest)
         )
-    except (ValueError, InvalidSignature) as exc:
+    except (TypeError, ValueError, InvalidSignature) as exc:
         raise OcrComponentError("OCR 组件签名校验失败", "SIGNATURE_INVALID") from exc
 
 
@@ -195,7 +202,16 @@ class OcrComponentManager:
             raise OcrComponentError("未找到 OCR 组件压缩包", "ARCHIVE_MISSING")
         if sha256_file(archive).lower() != expected_sha256.lower():
             raise OcrComponentError("OCR 组件校验失败，文件可能损坏", "ARCHIVE_HASH_INVALID")
-        if not version or any(char in version for char in "\\/:"):
+        try:
+            Version(version)
+        except InvalidVersion as exc:
+            raise OcrComponentError("OCR 组件版本号无效", "VERSION_INVALID") from exc
+        if (
+            not version
+            or version in {".", ".."}
+            or Path(version).name != version
+            or any(char in version for char in "\\/:")
+        ):
             raise OcrComponentError("OCR 组件版本号无效", "VERSION_INVALID")
 
         self.root.mkdir(parents=True, exist_ok=True)
@@ -307,6 +323,7 @@ class OcrComponentManager:
                 encoding="utf-8",
                 timeout=30,
                 cwd=str(engine.parent),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             event = parse_jsonl_event(completed.stdout.strip().splitlines()[-1])
             if (
@@ -345,7 +362,7 @@ class OcrComponentManager:
 
 
 class OcrEngineClient:
-    """Runs the standalone engine and exposes its line-delimited JSON events."""
+    """Runs one reusable JSONL engine for the lifetime of a conversion job."""
 
     def __init__(
         self,
@@ -353,72 +370,192 @@ class OcrEngineClient:
         timeout_seconds: int = 300,
         request_id: str | None = None,
         progress_callback: Callable[[dict], None] | None = None,
+        launcher: list[str] | None = None,
     ) -> None:
         self.engine_path = Path(engine_path)
         self.timeout_seconds = timeout_seconds
         self.request_id = request_id
         self.progress_callback = progress_callback
+        self._launcher = list(launcher) if launcher else None
         self._active_process: subprocess.Popen | None = None
+        self._process: subprocess.Popen | None = None
+        self._stdout_queue: queue.Queue[str | None] | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._stderr = None
+        self._run_lock = threading.Lock()
+        self._stop_code: str | None = None
+
+    def _command(self) -> list[str]:
+        return list(self._launcher or [str(self.engine_path)]) + ["--jsonl"]
+
+    @staticmethod
+    def _read_stdout(stream, target: queue.Queue[str | None]) -> None:
+        try:
+            for line in stream:
+                target.put(line)
+        finally:
+            target.put(None)
+
+    def _ensure_process(self) -> subprocess.Popen:
+        if self._process and self._process.poll() is None:
+            return self._process
+        if self._process:
+            self._dispose_process()
+        if self._launcher is None and not self.engine_path.is_file():
+            raise OcrComponentError("OCR 组件未安装或已损坏", "ENGINE_MISSING")
+        try:
+            self._stderr = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
+            process = subprocess.Popen(
+                self._command(),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=self._stderr,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=str(self.engine_path.parent),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as exc:
+            if self._stderr:
+                self._stderr.close()
+                self._stderr = None
+            raise OcrComponentError("无法启动 OCR 引擎", "ENGINE_START_FAILED") from exc
+        assert process.stdout is not None
+        self._process = process
+        self._active_process = process
+        self._stdout_queue = queue.Queue()
+        self._reader_thread = threading.Thread(
+            target=self._read_stdout,
+            args=(process.stdout, self._stdout_queue),
+            name="markitdown-ocr-reader",
+            daemon=True,
+        )
+        self._reader_thread.start()
+        return process
+
+    def _stderr_text(self) -> str:
+        if not self._stderr:
+            return ""
+        try:
+            self._stderr.seek(0)
+            return self._stderr.read()[:1000]
+        except (OSError, ValueError):
+            return ""
+
+    def _dispose_process(self) -> None:
+        process = self._process
+        reader = self._reader_thread
+        stderr = self._stderr
+        self._process = None
+        self._active_process = None
+        self._stdout_queue = None
+        self._reader_thread = None
+        self._stderr = None
+        if process:
+            for stream in (process.stdin, process.stdout):
+                if stream:
+                    try:
+                        stream.close()
+                    except (OSError, ValueError):
+                        pass
+        if reader and reader is not threading.current_thread():
+            reader.join(timeout=1)
+        if stderr:
+            try:
+                stderr.close()
+            except OSError:
+                pass
+
+    def _terminate_process(self, code: str | None, wait: bool = True) -> None:
+        process = self._process
+        if not process:
+            return
+        if code:
+            self._stop_code = code
+        if process.poll() is None:
+            process.terminate()
+            if wait:
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
 
     def stop(self) -> None:
-        process = self._active_process
-        if process and process.poll() is None:
-            process.terminate()
+        """Stop only the owned OCR child, normally after its timeout."""
+        self._terminate_process("OCR_TIMEOUT", wait=False)
+
+    def close(self) -> None:
+        """Release the reusable OCR child at the end of a conversion job."""
+        self._terminate_process(None)
+        self._dispose_process()
 
     def run(self, request: dict) -> Iterator[dict]:
-        if not self.engine_path.is_file():
-            raise OcrComponentError("OCR 组件未安装或已损坏", "ENGINE_MISSING")
-        command = [str(self.engine_path), "--jsonl"]
         request_id = str(request.get("request_id", ""))
-        try:
-            stderr = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
-        except OSError as exc:
-            raise OcrComponentError("无法创建 OCR 诊断日志", "ENGINE_START_FAILED") from exc
-        with stderr:
+        with self._run_lock:
+            process = self._ensure_process()
+            output_queue = self._stdout_queue
+            assert process.stdin is not None and output_queue is not None
+            self._stop_code = None
             try:
-                process = subprocess.Popen(
-                    command,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=stderr,
-                    text=True,
-                    encoding="utf-8",
-                    cwd=str(self.engine_path.parent),
-                )
-                self._active_process = process
-            except OSError as exc:
-                raise OcrComponentError("无法启动 OCR 引擎", "ENGINE_START_FAILED") from exc
-
-            assert process.stdin is not None and process.stdout is not None
-            process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
-            process.stdin.close()
-            try:
-                for line in process.stdout:
-                    if line.strip():
-                        event = parse_jsonl_event(line)
-                        if event.get("request_id") != request_id:
-                            raise OcrComponentError(
-                                "OCR 引擎返回了不匹配的 request_id", "REQUEST_ID_MISMATCH"
-                            )
-                        if self.progress_callback and event.get("type") == "progress":
-                            self.progress_callback(event)
-                        yield event
-                return_code = process.wait(timeout=self.timeout_seconds)
-            except subprocess.TimeoutExpired as exc:
-                process.terminate()
-                process.wait(timeout=10)
-                raise OcrComponentError("OCR 识别超时", "OCR_TIMEOUT") from exc
-            finally:
-                self._active_process = None
-            if return_code != 0:
-                stderr.seek(0)
+                process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+                process.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                diagnostic = self._stderr_text()
+                self._dispose_process()
                 raise OcrComponentError(
-                    f"OCR 引擎异常退出: {stderr.read()[:300]}", "ENGINE_RUNTIME_ERROR"
-                )
+                    f"OCR 引擎写入失败: {diagnostic[:300]}", "ENGINE_RUNTIME_ERROR"
+                ) from exc
+
+            deadline = time.monotonic() + self.timeout_seconds
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._terminate_process("OCR_TIMEOUT")
+                    self._dispose_process()
+                    raise OcrComponentError("OCR 识别超时", "OCR_TIMEOUT")
+                try:
+                    line = output_queue.get(timeout=remaining)
+                except queue.Empty as exc:
+                    self._terminate_process("OCR_TIMEOUT")
+                    self._dispose_process()
+                    raise OcrComponentError("OCR 识别超时", "OCR_TIMEOUT") from exc
+                if line is None:
+                    diagnostic = self._stderr_text()
+                    code = self._stop_code or "ENGINE_RUNTIME_ERROR"
+                    self._dispose_process()
+                    if code == "OCR_TIMEOUT":
+                        raise OcrComponentError("OCR 识别超时", code)
+                    raise OcrComponentError(f"OCR 引擎异常退出: {diagnostic[:300]}", code)
+                if not line.strip():
+                    continue
+                try:
+                    event = parse_jsonl_event(line)
+                except OcrComponentError:
+                    self._terminate_process(None)
+                    self._dispose_process()
+                    raise
+                if event.get("request_id") != request_id:
+                    self._terminate_process(None)
+                    self._dispose_process()
+                    raise OcrComponentError(
+                        "OCR 引擎返回了不匹配的 request_id", "REQUEST_ID_MISMATCH"
+                    )
+                if self.progress_callback and event.get("type") == "progress":
+                    self.progress_callback(event)
+                yield event
+                if event.get("type") in {"result", "error"}:
+                    return
 
     def recognise(
-        self, file_path: str, file_type: str, pages: list[int] | None = None
+        self,
+        file_path: str,
+        file_type: str,
+        pages: list[int] | None = None,
+        request_id: str | None = None,
     ) -> dict:
+        self.request_id = request_id or self.request_id or uuid.uuid4().hex
         result: dict | None = None
         for event in self.run(
             {
@@ -427,7 +564,7 @@ class OcrEngineClient:
                 "file_type": file_type,
                 "pages": pages or [],
                 "language": "chinese_english",
-                "request_id": self.request_id or "",
+                "request_id": self.request_id,
             }
         ):
             if event["type"] == "error":

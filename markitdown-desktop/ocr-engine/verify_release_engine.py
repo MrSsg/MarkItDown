@@ -40,13 +40,15 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def request(path: Path, file_type: str, request_id: str) -> dict:
+def request(
+    path: Path, file_type: str, request_id: str, pages: list[int] | None = None
+) -> dict:
     return {
         "version": "1.0",
         "request_id": request_id,
         "input_path": str(path),
         "file_type": file_type,
-        "pages": [],
+        "pages": pages or [],
         "language": "chinese_english",
     }
 
@@ -69,13 +71,20 @@ def main() -> None:
         f"OCR 健康检查失败: {diagnostic}",
     )
 
-    for path, file_type, request_id, expected in (
-        (args.sample_image, "image", "release-test", None),
-        (args.fixture_dir / "ocr-chinese.jpg", "image", "chinese-image-test", "离线"),
-        (args.fixture_dir / "ocr-scan.pdf", "pdf", "scan-pdf-test", "离线"),
+    for path, file_type, request_id, expected, pages in (
+        (args.sample_image, "image", "release-test", None, None),
+        (
+            args.fixture_dir / "ocr-chinese.jpg",
+            "image",
+            "chinese-image-test",
+            "离线",
+            None,
+        ),
+        (args.fixture_dir / "ocr-scan.pdf", "pdf", "scan-pdf-test", "离线", None),
+        (args.fixture_dir / "ocr-mixed.pdf", "pdf", "mixed-pdf-test", "离线", [2]),
     ):
         code, events, diagnostic = run_engine(
-            args.engine, request(path, file_type, request_id)
+            args.engine, request(path, file_type, request_id, pages)
         )
         result = next(
             (event for event in events if event.get("type") == "result"), None
@@ -87,6 +96,9 @@ def main() -> None:
             code == 0 and result is not None and result.get("request_id") == request_id,
             f"OCR {file_type} 识别回归失败: events={events!r}; stderr={diagnostic}",
         )
+        if pages is not None:
+            actual_pages = [int(page["number"]) for page in result.get("pages", [])]
+            require(actual_pages == pages, f"OCR 页码过滤失败: {actual_pages}")
         if expected:
             require(expected in text, f"OCR {file_type} 未识别预期中文文本: {text}")
 

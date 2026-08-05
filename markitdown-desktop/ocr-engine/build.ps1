@@ -7,6 +7,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $env:MARKITDOWN_OCR_SIGNING_KEY) {
+    throw "缺少 MARKITDOWN_OCR_SIGNING_KEY；拒绝生成未签名 OCR 组件"
+}
 $python = Get-Command py -ErrorAction Stop
 & $python.Source -3.12 -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
@@ -25,13 +28,16 @@ Copy-Item -LiteralPath $modelCache -Destination (Join-Path $intermediate "ocr-en
 New-Item -ItemType Directory -Force $Output | Out-Null
 Compress-Archive -Path (Join-Path $intermediate "ocr-engine\*") -DestinationPath (Join-Path $Output "ocr-engine.zip") -Force
 $archive = Join-Path $Output "ocr-engine.zip"
-if (-not $env:MARKITDOWN_OCR_SIGNING_KEY) {
-    throw "缺少 MARKITDOWN_OCR_SIGNING_KEY；拒绝生成未签名 OCR 组件"
-}
 & .\.venv\Scripts\python.exe .\sign_manifest.py `
     --archive $archive --output (Join-Path $Output "ocr-engine-manifest.json") `
     --url $ReleaseUrl --version $Version --min-app-version $MinimumAppVersion `
     --key-id $KeyId --private-key $env:MARKITDOWN_OCR_SIGNING_KEY
+& .\.venv\Scripts\python.exe .\validate_manifest.py `
+    --manifest (Join-Path $Output "ocr-engine-manifest.json") `
+    --archive $archive `
+    --public-key-file (Resolve-Path (Join-Path $PSScriptRoot "..\app\ocr_public_keys.json")) `
+    --require-release-url
+if ($LASTEXITCODE -ne 0) { throw "OCR 清单验证失败" }
 Get-FileHash $archive -Algorithm SHA256
 Remove-Item -LiteralPath $modelCache -Recurse -Force
 Remove-Item -LiteralPath $intermediate -Recurse -Force

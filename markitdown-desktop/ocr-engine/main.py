@@ -31,6 +31,10 @@ def emit(event_type: str, request_id: str = "", **data) -> None:
 def error_code(exc: Exception) -> str:
     if isinstance(exc, FileNotFoundError):
         return "INPUT_NOT_FOUND"
+    if isinstance(exc, (KeyError, TypeError, json.JSONDecodeError)):
+        return "INVALID_REQUEST"
+    if isinstance(exc, IndexError):
+        return "INVALID_PAGE"
     if isinstance(exc, ValueError):
         return "UNSUPPORTED_FILE_TYPE"
     if isinstance(exc, ImportError):
@@ -58,7 +62,27 @@ def ocr_image(ocr, image) -> str:
     return "\n".join(lines)
 
 
-def handle(request: dict) -> None:
+def engine_directory() -> Path:
+    return (
+        Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+        .resolve()
+        .parent
+    )
+
+
+def create_ocr():
+    from paddleocr import PaddleOCR
+
+    # Paddle 3.3's oneDNN backend fails for the PP-OCRv6 CPU graph on some
+    # Windows hosts. The standard CPU backend is slower but consistently works.
+    return PaddleOCR(lang="ch", enable_mkldnn=False)
+
+
+def handle(request: dict, ocr=None):
+    if request.get("version") not in {1, "1", "1.0"}:
+        raise TypeError("不支持的 OCR 协议版本")
+    if not isinstance(request.get("input_path"), str):
+        raise KeyError("input_path")
     engine_dir = (
         Path(sys.executable if getattr(sys, "frozen", False) else __file__)
         .resolve()
@@ -76,11 +100,8 @@ def handle(request: dict) -> None:
     file_type = request.get("file_type")
     if file_type not in {"image", "pdf"}:
         raise ValueError("不支持的 OCR 文件类型")
-    from paddleocr import PaddleOCR
-
-    # Paddle 3.3's oneDNN backend fails for the PP-OCRv6 CPU graph on some
-    # Windows hosts. The standard CPU backend is slower but consistently works.
-    ocr = PaddleOCR(lang="ch", enable_mkldnn=False)
+    if ocr is None:
+        ocr = create_ocr()
     if file_type == "image":
         emit("progress", request_id, current=1, total=1)
         emit(
@@ -88,35 +109,69 @@ def handle(request: dict) -> None:
             request_id,
             pages=[{"number": 1, "markdown": ocr_image(ocr, str(input_path))}],
         )
-        return
+        return ocr
     import fitz
 
     requested_pages = {int(page) for page in request.get("pages", [])}
+    if any(page <= 0 for page in requested_pages):
+        raise IndexError("PDF 页码必须从 1 开始")
     document = fitz.open(input_path)
-    pages = sorted(requested_pages or set(range(1, len(document) + 1)))
-    results = []
-    for current, page_number in enumerate(pages, start=1):
-        page = document[page_number - 1]
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-        results.append(
-            {"number": page_number, "markdown": ocr_image(ocr, pixmap.tobytes("png"))}
-        )
-        emit(
-            "progress", request_id, current=current, total=len(pages), page=page_number
-        )
-    document.close()
+    try:
+        pages = sorted(requested_pages or set(range(1, len(document) + 1)))
+        if any(page > len(document) for page in pages):
+            raise IndexError("PDF 页码超出文档范围")
+        results = []
+        for current, page_number in enumerate(pages, start=1):
+            page = document[page_number - 1]
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            results.append(
+                {
+                    "number": page_number,
+                    "markdown": ocr_image(ocr, pixmap.tobytes("png")),
+                }
+            )
+            emit(
+                "progress",
+                request_id,
+                current=current,
+                total=len(pages),
+                page=page_number,
+            )
+    finally:
+        document.close()
     emit("result", request_id, pages=results)
+    return ocr
+
+
+def run_jsonl(stream=None) -> int:
+    ocr = None
+    input_stream = sys.stdin if stream is None else stream
+    for line in input_stream:
+        if not line.strip():
+            continue
+        request_id = ""
+        try:
+            request = json.loads(line)
+            if not isinstance(request, dict):
+                raise TypeError("请求必须是 JSON 对象")
+            request_id = str(request.get("request_id", ""))
+            ocr = handle(request, ocr)
+        except Exception as exc:
+            emit(
+                "error",
+                request_id,
+                code=error_code(exc),
+                message=str(exc)[:500],
+                detail=traceback.format_exc()[-4000:],
+            )
+    return 0
 
 
 def main() -> int:
     request_id = ""
     try:
         if "--health" in sys.argv:
-            engine_dir = (
-                Path(sys.executable if getattr(sys, "frozen", False) else __file__)
-                .resolve()
-                .parent
-            )
+            engine_dir = engine_directory()
             if not (engine_dir / "models" / "official_models").is_dir():
                 raise RuntimeError("bundled models missing")
             import paddle
@@ -126,9 +181,11 @@ def main() -> int:
                 raise RuntimeError("Paddle runtime unavailable")
             emit("health", status="ok", protocol_version=1)
             return 0
+        if "--jsonl" in sys.argv:
+            return run_jsonl()
         request = json.loads(sys.stdin.readline())
         if not isinstance(request, dict):
-            raise ValueError("请求必须是 JSON 对象")
+            raise TypeError("请求必须是 JSON 对象")
         request_id = str(request.get("request_id", ""))
         handle(request)
         return 0

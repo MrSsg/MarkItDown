@@ -58,6 +58,20 @@ class JobControllerTests(unittest.TestCase):
             self.assertEqual("two.txt", next_item.file_name)
             self.assertEqual(JobState.RUNNING, controller.state)
 
+    def test_timeout_discards_late_error_as_timeout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "one.txt"
+            source.write_text("one", encoding="utf-8")
+            controller = self._controller(root)
+            controller.enqueue([str(source)])
+            controller.start()
+            controller.mark_timeout_waiting()
+            controller.fail_current(
+                JobFailure("conversion", "ENGINE_RUNTIME_ERROR", "late failure")
+            )
+            self.assertEqual("CONVERSION_TIMEOUT", controller.items[0].failure.code)
+
     def test_preflight_limits_and_retry(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

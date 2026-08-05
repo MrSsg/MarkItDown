@@ -18,6 +18,7 @@ class ConvertWorker(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thread = None
+        self._ocr_engine = None
 
     @property
     def is_running(self):
@@ -35,8 +36,15 @@ class ConvertWorker(QObject):
                 engine_path = str(info.path)
             else:
                 self.ocr_unavailable.emit(info.message or "OCR 组件未安装")
+        if not engine_path:
+            self.close_ocr_engine()
+        elif (
+            self._ocr_engine is None or str(self._ocr_engine.engine_path) != engine_path
+        ):
+            self.close_ocr_engine()
+            self._ocr_engine = OcrEngineClient(engine_path)
         self._thread = _ConvertThread(
-            file_path, engine_path, request_id or uuid.uuid4().hex
+            file_path, self._ocr_engine, request_id or uuid.uuid4().hex
         )
         self._thread.finished.connect(self._relay_thread_result)
         self._thread.progress.connect(self.progress.emit)
@@ -46,8 +54,13 @@ class ConvertWorker(QObject):
 
     def stop_owned_ocr_process(self):
         """Only the optional child process may be stopped; never terminate Qt work."""
-        if self._thread is not None:
-            self._thread.stop_owned_ocr_process()
+        if self._ocr_engine is not None:
+            self._ocr_engine.stop()
+
+    def close_ocr_engine(self):
+        if self._ocr_engine is not None:
+            self._ocr_engine.close()
+            self._ocr_engine = None
 
     def _relay_thread_result(self):
         thread = self._thread
@@ -63,12 +76,11 @@ class ConvertWorker(QObject):
 class _ConvertThread(QThread):
     progress = Signal(object)
 
-    def __init__(self, file_path, engine_path=None, request_id=None):
+    def __init__(self, file_path, ocr_engine=None, request_id=None):
         super().__init__()
         self._file_path = file_path
-        self._engine_path = engine_path
+        self._ocr_engine = ocr_engine
         self._request_id = request_id
-        self._ocr_engine = None
         self.markdown = None
         self.error_payload = None
 
@@ -88,7 +100,7 @@ class _ConvertThread(QThread):
             from markitdown import MarkItDown
 
             md = MarkItDown()
-            if self._engine_path:
+            if self._ocr_engine:
 
                 def report(event):
                     if event.get("type") == "progress":
@@ -102,14 +114,14 @@ class _ConvertThread(QThread):
                             }
                         )
 
-                engine = OcrEngineClient(
-                    self._engine_path,
-                    request_id=self._request_id,
-                    progress_callback=report,
+                self._ocr_engine.request_id = self._request_id
+                self._ocr_engine.progress_callback = report
+                md.register_converter(
+                    LocalOcrImageConverter(self._ocr_engine), priority=-1.0
                 )
-                self._ocr_engine = engine
-                md.register_converter(LocalOcrImageConverter(engine), priority=-1.0)
-                md.register_converter(LocalOcrPdfConverter(engine), priority=-1.0)
+                md.register_converter(
+                    LocalOcrPdfConverter(self._ocr_engine), priority=-1.0
+                )
             result = md.convert(self._file_path)
             content = result.text_content
             self.markdown = content
