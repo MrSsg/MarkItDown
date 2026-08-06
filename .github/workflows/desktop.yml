@@ -39,7 +39,7 @@ jobs:
       - name: Test OCR release archive
         shell: pwsh
         run: ./markitdown-desktop/ocr-engine/test_release_ocr.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ocr-engine
           path: markitdown-desktop/ocr-engine/dist/
