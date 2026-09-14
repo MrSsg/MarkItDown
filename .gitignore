@@ -173,3 +173,5 @@ cython_debug/
 src/.DS_Store
 .DS_Store
 .cursorrules
+*.md
+*.md

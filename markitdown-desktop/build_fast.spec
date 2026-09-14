@@ -60,6 +60,13 @@ a = Analysis(
 # locked-file failure while COLLECT assembles the onedir release.
 a.binaries = TOC(entry for entry in a.binaries if entry[0].lower() != 'ucrtbase.dll')
 
+# Qt uses Windows' ICU API. A Poppler/Conda ICU found on PATH exports
+# version-suffixed symbols and shadows the system DLL in a frozen app.
+a.binaries = TOC(
+    entry for entry in a.binaries
+    if entry[0].lower() not in {'icuuc.dll', 'icudt78.dll'}
+)
+
 pyz = PYZ(a.pure, cipher=block_cipher)
 
 exe = EXE(
