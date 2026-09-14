@@ -31,7 +31,7 @@ $fixtures = @(
 foreach ($fixture in $fixtures) {
     $input = Join-Path $PSScriptRoot $fixture.Path
     $result = Join-Path $env:TEMP ("markitdown-smoke-" + [guid]::NewGuid().ToString("N") + ".txt")
-    $process = Start-Process -FilePath $exe -ArgumentList @("--smoke-convert", $input, "--smoke-output", $result) -Wait -PassThru
+    $process = Start-Process -FilePath $exe -ArgumentList @("--smoke-convert", $input, "--smoke-output", $result) -WindowStyle Hidden -Wait -PassThru
     if (-not (Test-Path $result)) {
         throw "发行版未写入冒烟结果: $input (exit $($process.ExitCode))"
     }

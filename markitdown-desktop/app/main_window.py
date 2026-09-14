@@ -54,6 +54,7 @@ SUPPORTED_FILTER = (
 
 
 class MainWindow(QMainWindow):
+    PREVIEW_PAGE_CHARS = 12000
     workspace_mode_changed = Signal(str)
     job_summary_changed = Signal(str)
 
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self._current_markdown = ""
         self._float_win = None
         self._view_source = False
+        self._preview_page = 0
         self._workspace_mode: WorkspaceMode | None = None
         self._queue_collapsed = False
         self._workspace_reflow_pending = False
@@ -360,6 +362,19 @@ class MainWindow(QMainWindow):
         self._preview.setObjectName("markdownPreview")
         self._preview.setAccessibleName("Markdown 结果预览")
         layout.addWidget(self._preview, 1)
+        self._preview_pager = QWidget()
+        pager = QHBoxLayout(self._preview_pager)
+        pager.setContentsMargins(0, 0, 0, 0)
+        self._preview_previous = QPushButton("上一段")
+        self._preview_next = QPushButton("下一段")
+        self._preview_page_label = QLabel()
+        pager.addWidget(self._preview_page_label, 1)
+        pager.addWidget(self._preview_previous)
+        pager.addWidget(self._preview_next)
+        self._preview_previous.clicked.connect(lambda: self._change_preview_page(-1))
+        self._preview_next.clicked.connect(lambda: self._change_preview_page(1))
+        self._preview_pager.hide()
+        layout.addWidget(self._preview_pager)
         return pane
 
     def _connect_signals(self) -> None:
@@ -707,6 +722,7 @@ class MainWindow(QMainWindow):
         item = next((value for value in self._jobs.items if value.file_path == path), None)
         if not item:
             return
+        self._preview_pager.hide()
         self._current_file = path
         self._detail_title.setText(item.file_name)
         self._retry_current_action.setEnabled(bool(item.failure))
@@ -729,22 +745,43 @@ class MainWindow(QMainWindow):
         self._refresh_pin_actions()
 
     def _show_markdown(self, item: JobItem, markdown: str) -> None:
+        self._preview_page = 0
         self._set_detail_status("已完成", "success")
         self._detail_meta.setText(
             f"已转换 · 结果仅在本次会话中缓存：{item.result_path.name if item.result_path else ''}"
         )
-        if self._view_source:
-            self._preview.setPlainText(markdown)
-        else:
-            self._render_markdown(markdown)
+        self._render_markdown(markdown)
+
+    def _change_preview_page(self, delta: int) -> None:
+        last = max(0, (len(self._current_markdown) - 1) // self.PREVIEW_PAGE_CHARS)
+        self._preview_page = max(0, min(last, self._preview_page + delta))
+        self._render_markdown(self._current_markdown)
 
     def _toggle_preview_mode(self) -> None:
         self._view_source = not self._view_source
         self._view_mode_btn.setText("查看预览" if self._view_source else "查看源码")
         if self._current_markdown:
-            self._on_job_selected(self._current_file or "")
+            self._render_markdown(self._current_markdown)
 
     def _render_markdown(self, text: str) -> None:
+        # Bound both Markdown parsing and Qt layout on the GUI thread. Large
+        # tables/code blocks may span segments, so show their original text.
+        large = len(text) > self.PREVIEW_PAGE_CHARS
+        self._preview_pager.setVisible(large)
+        if large:
+            pages = (len(text) + self.PREVIEW_PAGE_CHARS - 1) // self.PREVIEW_PAGE_CHARS
+            self._preview_page = min(self._preview_page, pages - 1)
+            start = self._preview_page * self.PREVIEW_PAGE_CHARS
+            self._preview.setPlainText(text[start:start + self.PREVIEW_PAGE_CHARS])
+            self._preview_page_label.setText(
+                f"大结果分段显示源码 · {self._preview_page + 1}/{pages} · 复制和导出包含全文"
+            )
+            self._preview_previous.setEnabled(self._preview_page > 0)
+            self._preview_next.setEnabled(self._preview_page + 1 < pages)
+            return
+        if self._view_source:
+            self._preview.setPlainText(text)
+            return
         try:
             import markdown as markdown_lib
 
@@ -951,6 +988,7 @@ class MainWindow(QMainWindow):
         entry = item.data(Qt.ItemDataRole.UserRole + 1)
         if not isinstance(entry, HistoryEntry):
             return
+        self._preview_pager.hide()
         self._history_dock.show()
         self._detail_title.setText(entry.file_name)
         self._set_detail_status("历史记录", "warning")
@@ -991,6 +1029,7 @@ class MainWindow(QMainWindow):
             self._on_files_dropped([entry.file_path])
 
     def _set_empty_detail(self) -> None:
+        self._preview_pager.hide()
         self._set_detail_status("未选择", "warning")
         self._detail_title.setText("结果详情")
         self._detail_meta.setText("从左侧队列选择任务，或先添加文件。")

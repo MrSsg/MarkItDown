@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -110,6 +111,37 @@ class WorkspaceUiTests(unittest.TestCase):
         self.window.resize(1200, 800)
         self.app.processEvents()
         self.assertEqual("Wide", self.window._workspace_mode.value)
+
+    def test_large_result_does_not_block_preview(self):
+        from app.jobs import JobItem
+
+        content = "| Column A | Column B |\n| --- | --- |\n" + "| sample text | more text |\n" * 10000
+        self.window._current_markdown = content
+        start = time.perf_counter()
+        self.window._show_markdown(JobItem("large.csv"), content)
+        self.app.processEvents()
+        elapsed = time.perf_counter() - start
+        print(f"Large preview UI stall: {elapsed:.3f}s")
+        self.assertLess(elapsed, 1.0, "Result preview blocks the UI thread")
+
+    def test_large_preview_paging_preserves_complete_result(self):
+        from app.jobs import JobItem
+
+        content = "中文 abc 123\n" * 4000 + "最后一行"
+        self.window._current_markdown = content
+        self.window._show_markdown(JobItem("large.txt"), content)
+        parts = [self.window._preview.toPlainText()]
+        while self.window._preview_next.isEnabled():
+            self.window._preview_next.click()
+            parts.append(self.window._preview.toPlainText())
+        self.assertEqual(content, "".join(parts))
+        self.window._toggle_preview_mode()
+        self.assertEqual(parts[-1], self.window._preview.toPlainText())
+        self.window._copy_btn.click()
+        self.assertEqual(content, QApplication.clipboard().text())
+        self.window._show_markdown(JobItem("small.txt"), "small result")
+        self.assertTrue(self.window._preview_pager.isHidden())
+        self.assertEqual("small result", self.window._preview.toPlainText())
 
     def test_stacked_resize_reflows_splitter_after_layout_activation(self):
         self.window.resize(720, 900)

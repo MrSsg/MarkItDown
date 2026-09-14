@@ -9,7 +9,7 @@ MarkItDownDesk 是一个面向 Windows 的 Markdown 文档转换工作台，提�
 
 ## 当前版本
 
-- 桌面端：<code>v1.2.2</code>
+- 桌面端：<code>v1.2.3</code>
 - 目标平台：Windows x64、CPU、支持 AVX
 - 桌面包运行时：不依赖系统 Python、PaddlePaddle 或开发环境
 - OCR：可选的本地 PaddleOCR，中英文 CPU 模型
@@ -58,7 +58,7 @@ MarkItDownDesk 是一个面向 Windows 的 Markdown 文档转换工作台，提�
 
 ### 桌面端
 
-从 [GitHub Releases](https://github.com/MrSsg/MarkItDown/releases) 下载最新的 Windows x64 压缩包，当前版本为 [MarkItDownDesk v1.2.2](https://github.com/MrSsg/MarkItDown/releases/tag/v1.2.2)。
+从 [GitHub Releases](https://github.com/MrSsg/MarkItDown/releases) 下载已发布的 Windows x64 压缩包。本地版本为 v1.2.3，包含大结果分段预览优化；本地打包不会自动发布到 GitHub。
 
 1. 解压压缩包。
 2. 运行 <code>MarkItDownDesk-fast.exe</code>。
@@ -141,7 +141,7 @@ $env:PYTHONPATH = "$PWD\markitdown-desktop;$PWD\packages\markitdown\src"
 发行版回归测试：
 
 ~~~powershell
-pwsh .\markitdown-desktop\test_release.ps1 -ReleaseDirectory ".\markitdown-desktop\dist\MarkItDownDesk-fast-v1.2.2-windows-x64"
+pwsh .\markitdown-desktop\test_release.ps1 -ReleaseDirectory ".\markitdown-desktop\dist\MarkItDownDesk-fast-v1.2.3-windows-x64"
 ~~~
 
 CI 会在 Windows Python 3.12 环境中执行桌面单元测试、真实 EXE 四格式转换和 OCR 集成冒烟测试。
