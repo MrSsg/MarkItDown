@@ -1,10 +1,12 @@
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
 
 from app.jobs import JobController, JobFailure, JobState, ResourceLimits, SessionStore
+from app.history import HistoryManager
 from app.worker import ConvertWorker
 
 
@@ -14,8 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 class JobControllerTests(unittest.TestCase):
     def _controller(self, root: Path) -> JobController:
         return JobController(
-            ResourceLimits(max_file_bytes=1024, max_batch_items=2, max_pdf_pages=500,
-                           max_zip_uncompressed_bytes=1024, max_zip_entries=10, max_zip_ratio=10),
+            ResourceLimits(
+                max_file_bytes=1024,
+                max_batch_items=2,
+                max_pdf_pages=500,
+                max_zip_uncompressed_bytes=1024,
+                max_zip_entries=10,
+                max_zip_ratio=10,
+            ),
             SessionStore(root / "sessions"),
         )
 
@@ -51,6 +59,20 @@ class JobControllerTests(unittest.TestCase):
             self.assertEqual("two.txt", next_item.file_name)
             self.assertEqual(JobState.RUNNING, controller.state)
 
+    def test_timeout_discards_late_error_as_timeout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "one.txt"
+            source.write_text("one", encoding="utf-8")
+            controller = self._controller(root)
+            controller.enqueue([str(source)])
+            controller.start()
+            controller.mark_timeout_waiting()
+            controller.fail_current(
+                JobFailure("conversion", "ENGINE_RUNTIME_ERROR", "late failure")
+            )
+            self.assertEqual("CONVERSION_TIMEOUT", controller.items[0].failure.code)
+
     def test_preflight_limits_and_retry(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -59,9 +81,45 @@ class JobControllerTests(unittest.TestCase):
             controller = self._controller(root)
             controller.enqueue([str(large)])
             self.assertEqual("FILE_TOO_LARGE", controller.items[0].failure.code)
-            controller.items[0].failure = JobFailure("conversion", "FAILED", "temporary")
+            controller.items[0].failure = JobFailure(
+                "conversion", "FAILED", "temporary"
+            )
             large.write_text("small", encoding="utf-8")
             self.assertEqual(1, len(controller.retry_failures()))
+
+    def test_single_retry_keeps_later_queued_items(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = []
+            for name in ("one.txt", "two.txt", "three.txt"):
+                path = root / name
+                path.write_text(name, encoding="utf-8")
+                paths.append(str(path))
+            controller = self._controller(root)
+            controller.enqueue(paths)
+            controller.items[0].state = "success"
+            controller.items[1].state = "error"
+            controller.items[1].failure = JobFailure("conversion", "FAILED", "temporary")
+            controller.items[2].state = "queued"
+            controller.index = len(controller.items)
+            controller.state = JobState.COMPLETED
+
+            self.assertIsNotNone(controller.retry_item(paths[1]))
+            self.assertEqual("queued", controller.items[2].state)
+            current = controller.start()
+            self.assertEqual("two.txt", current.file_name)
+            next_item = controller.complete_current("retry")
+            self.assertEqual("three.txt", next_item.file_name)
+
+    def test_nested_zip_is_rejected_without_extraction(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "nested.zip"
+            with zipfile.ZipFile(archive, "w") as package:
+                package.writestr("inside.zip", b"not extracted")
+            controller = self._controller(root)
+            controller.enqueue([str(archive)])
+            self.assertEqual("ZIP_NESTED_ARCHIVE", controller.items[0].failure.code)
 
     def test_session_store_is_disk_backed_and_cleanup_removes_result(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -70,6 +128,57 @@ class JobControllerTests(unittest.TestCase):
             self.assertEqual("markdown", store.read(result))
             store.cleanup()
             self.assertFalse(result.exists())
+
+    def test_pinned_result_survives_session_cleanup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SessionStore(Path(temp) / "sessions")
+            result = store.write("C:/source.txt", "markdown")
+            pinned = store.pin(result, "source.txt")
+            store.cleanup()
+            self.assertEqual("markdown", pinned.read_text(encoding="utf-8"))
+
+    def test_history_manager_can_unpin_one_or_all_results(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_one = root / "one.txt"
+            source_two = root / "two.txt"
+            source_one.write_text("one", encoding="utf-8")
+            source_two.write_text("two", encoding="utf-8")
+            manager = HistoryManager(path=root / "history.json")
+            manager.add(HistoryManager.make_entry(str(source_one)))
+            manager.add(HistoryManager.make_entry(str(source_two)))
+            pinned_dir = root / "pinned"
+            pinned_dir.mkdir()
+            pinned_one = pinned_dir / "one.md"
+            pinned_two = pinned_dir / "two.md"
+            pinned_one.write_text("one", encoding="utf-8")
+            pinned_two.write_text("two", encoding="utf-8")
+            manager.mark_pinned(str(source_one), str(pinned_one))
+            manager.mark_pinned(str(source_two), str(pinned_two))
+
+            self.assertEqual(str(pinned_one), manager.unpin(str(source_one)))
+            self.assertFalse(pinned_one.exists())
+            self.assertEqual(1, len(manager.pinned_entries))
+            removed = manager.clear_pins()
+            self.assertEqual([str(pinned_two)], removed)
+            self.assertFalse(pinned_two.exists())
+            self.assertFalse(manager.pinned_entries)
+
+    def test_failures_are_written_to_session_log_with_request_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "broken.txt"
+            source.write_text("broken", encoding="utf-8")
+            controller = self._controller(root)
+            controller.enqueue([str(source)])
+            item = controller.start()
+            self.assertIsNotNone(item)
+            controller.fail_current(
+                JobFailure("ocr", "INPUT_NOT_FOUND", "输入文件不存在", "detail")
+            )
+            logged = controller.store.read_log(controller.items[0].log_path)
+            self.assertIn('"code": "INPUT_NOT_FOUND"', logged)
+            self.assertIn(controller.items[0].request_id, logged)
 
 
 class WorkerContractTests(unittest.TestCase):

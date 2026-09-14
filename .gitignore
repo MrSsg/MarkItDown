@@ -36,6 +36,7 @@ MANIFEST
 !markitdown-desktop/build.spec
 !markitdown-desktop/build_fast.spec
 !markitdown-desktop/ocr-engine/ocr_engine.spec
+!markitdown-desktop/app/windows.manifest
 
 # Installer logs
 pip-log.txt

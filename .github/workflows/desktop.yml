@@ -1,7 +1,7 @@
 name: desktop
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -18,7 +18,15 @@ jobs:
           python-version: '3.12'
       - name: Build desktop release
         shell: pwsh
+        env:
+          MARKITDOWN_OCR_PUBLIC_KEYS_FILE: ${{ github.workspace }}\markitdown-desktop\app\ocr_public_keys.json
         run: ./markitdown-desktop/build_fast.ps1
+      - name: Run desktop unit tests
+        shell: pwsh
+        working-directory: markitdown-desktop
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./.venv-build/Scripts/python.exe -m unittest discover -s tests -q
       - name: Test real executable
         shell: pwsh
         run: ./markitdown-desktop/test_release.ps1
@@ -26,6 +34,8 @@ jobs:
   ocr-release:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,12 +43,31 @@ jobs:
           python-version: '3.12'
       - name: Build signed OCR component
         shell: pwsh
+        working-directory: markitdown-desktop/ocr-engine
         env:
           MARKITDOWN_OCR_SIGNING_KEY: ${{ secrets.MARKITDOWN_OCR_SIGNING_KEY }}
-        run: ./markitdown-desktop/ocr-engine/build.ps1
+        run: ./build.ps1
       - name: Test OCR release archive
         shell: pwsh
-        run: ./markitdown-desktop/ocr-engine/test_release_ocr.ps1
+        working-directory: markitdown-desktop/ocr-engine
+        run: ./test_release_ocr.ps1
+      - name: Build desktop for OCR integration
+        shell: pwsh
+        working-directory: markitdown-desktop
+        env:
+          MARKITDOWN_OCR_PUBLIC_KEYS_FILE: ${{ github.workspace }}\markitdown-desktop\app\ocr_public_keys.json
+        run: ./build_fast.ps1 -OutputRoot "$env:RUNNER_TEMP\markitdown-desktop-ocr-build"
+      - name: Test desktop OCR integration
+        shell: pwsh
+        run: |
+          $build = Get-ChildItem "$env:RUNNER_TEMP\markitdown-desktop-ocr-build" -Directory -Filter "py312-*" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $build) { throw "未找到 OCR 集成桌面构建目录" }
+          $release = Join-Path $build.FullName "MarkItDownDesk-fast"
+          ./markitdown-desktop/test_release_ocr_desktop.ps1 `
+            -ReleaseDirectory $release `
+            -OcrArchive "${{ github.workspace }}\markitdown-desktop\ocr-engine\dist\ocr-engine.zip" `
+            -OcrManifest "${{ github.workspace }}\markitdown-desktop\ocr-engine\dist\ocr-engine-manifest.json"
       - uses: actions/upload-artifact@v4
         with:
           name: ocr-engine

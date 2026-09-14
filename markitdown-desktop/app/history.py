@@ -17,16 +17,23 @@ class HistoryEntry:
     file_type: str
     timestamp: float
     output_preview: str = ""  # retained only for backwards-compatible reads
+    export_path: str = ""
+    exported_at: float | None = None
+    pinned_path: str = ""
 
 
 class HistoryManager:
     """历史记录管理，JSON 文件持久化。"""
 
-    def __init__(self, max_entries: int = 50) -> None:
+    def __init__(self, max_entries: int = 50, path: str | os.PathLike[str] | None = None) -> None:
         self._max = max_entries
-        data_dir = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        data_dir = (
+            os.path.dirname(os.path.abspath(os.fspath(path)))
+            if path is not None
+            else QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        )
         os.makedirs(data_dir, exist_ok=True)
-        self._path = os.path.join(data_dir, "history.json")
+        self._path = os.path.abspath(os.fspath(path)) if path is not None else os.path.join(data_dir, "history.json")
         self._entries: List[HistoryEntry] = []
         self._load()
 
@@ -50,13 +57,77 @@ class HistoryManager:
         self._entries.clear()
         self._save()
 
+    def mark_export(self, file_path: str, export_path: str) -> None:
+        for entry in self._entries:
+            if entry.file_path == file_path:
+                entry.export_path = export_path
+                entry.exported_at = time.time()
+                break
+        self._save()
+
+    def mark_pinned(self, file_path: str, pinned_path: str) -> None:
+        for entry in self._entries:
+            if entry.file_path == file_path:
+                entry.pinned_path = pinned_path
+                break
+        self._save()
+
+    @property
+    def pinned_entries(self) -> List[HistoryEntry]:
+        return [entry for entry in self._entries if entry.pinned_path]
+
+    def unpin(self, file_path: str) -> str:
+        """Detach and remove the managed pinned result for one source file."""
+        pinned_path = ""
+        for entry in self._entries:
+            if entry.file_path == file_path:
+                pinned_path = entry.pinned_path
+                entry.pinned_path = ""
+                break
+        if pinned_path:
+            self._delete_managed_pinned(pinned_path)
+        self._save()
+        return pinned_path
+
+    def clear_pins(self) -> List[str]:
+        """Detach and remove every managed pinned result."""
+        paths = [entry.pinned_path for entry in self._entries if entry.pinned_path]
+        for entry in self._entries:
+            entry.pinned_path = ""
+        for path in paths:
+            self._delete_managed_pinned(path)
+        self._save()
+        return paths
+
+    def _delete_managed_pinned(self, pinned_path: str) -> None:
+        target = os.path.abspath(pinned_path)
+        root = os.path.abspath(os.path.join(os.path.dirname(self._path), "pinned"))
+        try:
+            if os.path.commonpath([target, root]) != root:
+                return
+            if os.path.isfile(target):
+                os.remove(target)
+        except (OSError, ValueError):
+            pass
+
     def _load(self) -> None:
         if not os.path.isfile(self._path):
             return
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._entries = [HistoryEntry(**item) for item in data[: self._max]]
+            migrated = False
+            self._entries = []
+            for item in data[: self._max]:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("output_preview"):
+                    migrated = True
+                item = dict(item)
+                item["output_preview"] = ""
+                self._entries.append(HistoryEntry(**item))
+            if migrated:
+                self._save()
         except (json.JSONDecodeError, TypeError, KeyError):
             self._entries = []
 

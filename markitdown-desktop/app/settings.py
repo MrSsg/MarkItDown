@@ -120,6 +120,14 @@ class AppSettings:
     def show_float_window(self, val: bool) -> None:
         self._settings.setValue("float/show", val)
 
+    @property
+    def reduce_motion(self) -> bool:
+        return self._settings.value("accessibility/reduce_motion", False, type=bool)
+
+    @reduce_motion.setter
+    def reduce_motion(self, val: bool) -> None:
+        self._settings.setValue("accessibility/reduce_motion", val)
+
     # ── 关闭行为 ──────────────────────────────────────────
 
     @property

@@ -22,6 +22,7 @@ a = Analysis(
         ('assets/markconvert_float_16.png', 'assets'),
         ('assets/markconvert_float_32.png', 'assets'),
         ('assets/markconvert_float_128.png', 'assets'),
+        ('assets/markconvert_float.svg', 'assets'),
         ('assets/check.png', 'assets'),
         ('assets/Convert.png', 'assets'),
         ('assets/copy.png', 'assets'),
@@ -86,6 +87,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/app_icon.ico',
+    manifest='app/windows.manifest',
 )
 
 coll = COLLECT(

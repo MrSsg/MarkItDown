@@ -2,6 +2,7 @@
 
 import sys
 import os
+import uuid
 
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QAction
@@ -21,12 +22,25 @@ from app.main_window import MainWindow
 from app.float_window import FloatWindow
 
 
-def _smoke_convert(file_path: str, result_path: str | None = None) -> int:
+def _smoke_convert(
+    file_path: str,
+    result_path: str | None = None,
+    ocr_engine_path: str | None = None,
+) -> int:
     """Headless conversion entry point used by clean-machine package tests."""
+    engine = None
     try:
         from markitdown import MarkItDown
 
-        result = MarkItDown().convert(file_path)
+        converter = MarkItDown()
+        if ocr_engine_path:
+            from app.local_ocr import LocalOcrImageConverter, LocalOcrPdfConverter
+            from app.ocr import OcrEngineClient
+
+            engine = OcrEngineClient(ocr_engine_path, request_id=uuid.uuid4().hex)
+            converter.register_converter(LocalOcrImageConverter(engine), priority=-1.0)
+            converter.register_converter(LocalOcrPdfConverter(engine), priority=-1.0)
+        result = converter.convert(file_path)
         output = result.markdown or "# MarkItDown conversion completed"
         if result_path:
             with open(result_path, "w", encoding="utf-8") as stream:
@@ -40,6 +54,9 @@ def _smoke_convert(file_path: str, result_path: str | None = None) -> int:
                 stream.write("error\n" + str(exc))
         print(f"Conversion failed: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if engine is not None:
+            engine.close()
 
 
 def main() -> None:
@@ -52,9 +69,24 @@ def main() -> None:
             output_index = sys.argv.index("--smoke-output")
             if output_index + 1 < len(sys.argv):
                 result_path = sys.argv[output_index + 1]
-        raise SystemExit(_smoke_convert(sys.argv[index + 1], result_path))
+        ocr_engine_path = None
+        if "--smoke-ocr-engine" in sys.argv:
+            engine_index = sys.argv.index("--smoke-ocr-engine")
+            if engine_index + 1 < len(sys.argv):
+                ocr_engine_path = sys.argv[engine_index + 1]
+        if "--smoke-enable-ocr" in sys.argv and not ocr_engine_path:
+            from app.ocr import OcrComponentManager
+
+            info = OcrComponentManager().status()
+            if info.installed and info.path:
+                ocr_engine_path = str(info.path)
+            else:
+                raise SystemExit("OCR 组件未安装，无法执行 OCR 冒烟测试")
+        raise SystemExit(
+            _smoke_convert(sys.argv[index + 1], result_path, ocr_engine_path)
+        )
     app = QApplication(sys.argv)
-    app.setApplicationName("MarkConvert Desk")
+    app.setApplicationName(__app_name__)
     app.setOrganizationName(__app_name__)
     app.setQuitOnLastWindowClosed(False)
 
@@ -72,6 +104,7 @@ def main() -> None:
     # ── 窗口 ──
     main_win = MainWindow(settings, theme_mgr, history_mgr)
     app.aboutToQuit.connect(main_win._jobs.store.cleanup)
+    app.aboutToQuit.connect(main_win._worker.close_ocr_engine)
     main_win.setWindowIcon(icon)
 
     float_win = FloatWindow(settings, theme_mgr)
@@ -80,6 +113,7 @@ def main() -> None:
 
     # ── 信号连接 ──
     float_win.file_dropped.connect(lambda p: main_win._on_files_dropped([p]))
+    float_win.import_requested.connect(main_win._open_file)
     float_win.show_main_requested.connect(main_win.show)
     float_win.show_main_requested.connect(main_win.raise_)
     float_win.show_main_requested.connect(main_win.activateWindow)
