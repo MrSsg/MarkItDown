@@ -2,5 +2,7 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    # Keep only the two maintained branches; update Actions manually.
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"

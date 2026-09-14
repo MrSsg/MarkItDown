@@ -1,7 +1,8 @@
 param(
     [string]$ReleaseDirectory = "",
     [string]$OcrArchive = "",
-    [string]$OcrManifest = ""
+    [string]$OcrManifest = "",
+    [string]$OcrSourceDirectory = (Join-Path $PSScriptRoot "ocr-engine")
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +13,7 @@ if (-not $ReleaseDirectory) {
     $ReleaseDirectory = Join-Path $latest.FullName "MarkItDownDesk-fast"
 }
 if (-not $OcrArchive) {
-    $OcrArchive = Join-Path $PSScriptRoot "ocr-engine\dist\ocr-engine.zip"
+    $OcrArchive = Join-Path $OcrSourceDirectory "dist\ocr-engine.zip"
 }
 if (-not $OcrManifest) {
     $candidateManifest = Join-Path ([IO.Path]::GetDirectoryName($OcrArchive)) "ocr-engine-manifest.json"
@@ -26,13 +27,13 @@ if (-not (Test-Path -LiteralPath $OcrArchive)) { throw "未找到 OCR 组件归�
 
 $target = Join-Path ([IO.Path]::GetTempPath()) ("markitdown-desktop-ocr-" + [guid]::NewGuid().ToString("N"))
 $fixtureDir = Join-Path $target "fixtures"
-$python = Join-Path $PSScriptRoot "ocr-engine\.venv\Scripts\python.exe"
+$python = Join-Path $OcrSourceDirectory ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) { throw "未找到 OCR Python 3.12 环境: $python" }
 if ($OcrManifest) {
     if (-not (Test-Path -LiteralPath $OcrManifest -PathType Leaf)) {
         throw "未找到 OCR 组件清单: $OcrManifest"
     }
-    & $python (Join-Path $PSScriptRoot "ocr-engine\validate_manifest.py") `
+    & $python (Join-Path $OcrSourceDirectory "validate_manifest.py") `
         --manifest $OcrManifest --archive $OcrArchive `
         --public-key-file (Resolve-Path (Join-Path $PSScriptRoot "app\ocr_public_keys.json")) `
         --require-release-url
@@ -40,7 +41,7 @@ if ($OcrManifest) {
 }
 try {
     Expand-Archive -LiteralPath $OcrArchive -DestinationPath $target -Force
-    & $python (Join-Path $PSScriptRoot "ocr-engine\generate_test_fixtures.py") --output $fixtureDir
+    & $python (Join-Path $OcrSourceDirectory "generate_test_fixtures.py") --output $fixtureDir
     if ($LASTEXITCODE -ne 0) { throw "无法生成 OCR 测试夹具" }
     $engine = Join-Path $target "ocr-engine.exe"
     if (-not (Test-Path -LiteralPath $engine)) {
@@ -61,7 +62,7 @@ try {
             "--smoke-output", $result,
             "--smoke-enable-ocr",
             "--smoke-ocr-engine", $engine
-        ) -Wait -PassThru
+        ) -WindowStyle Hidden -Wait -PassThru
         if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $result)) {
             throw "桌面 OCR 冒烟失败: $($fixture.Path) (exit $($process.ExitCode))"
         }

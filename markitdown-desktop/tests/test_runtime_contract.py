@@ -3,7 +3,8 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtWidgets import QApplication
 
 from app.jobs import JobController, JobFailure, JobState, ResourceLimits, SessionStore
 from app.history import HistoryManager
@@ -188,7 +189,7 @@ class WorkerContractTests(unittest.TestCase):
         self.assertIn("stop_owned_ocr_process", source)
 
     def test_worker_starts_next_job_after_previous_thread_finishes(self):
-        app = QCoreApplication.instance() or QCoreApplication([])
+        app = QApplication.instance() or QApplication([])
         del app
         with tempfile.TemporaryDirectory() as temp:
             first = Path(temp) / "first.txt"

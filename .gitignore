@@ -174,5 +174,6 @@ cython_debug/
 src/.DS_Store
 .DS_Store
 .cursorrules
-*.md
-*.md
+
+# Optional checkout of the independent OCR branch
+markitdown-desktop/ocr-engine/

@@ -2,6 +2,7 @@
 
 ```powershell
 $env:PYTHONPATH = "$PWD\markitdown-desktop;$PWD\packages\markitdown\src"
+$env:QT_QPA_PLATFORM = "offscreen"
 & "$PWD\markitdown-desktop\.venv-build\Scripts\python.exe" -m unittest discover -s markitdown-desktop/tests -v
 ```
 
@@ -14,7 +15,9 @@ pwsh ./markitdown-desktop/test_release.ps1
 使用已构建的 OCR 归档验证桌面端安装外的 OCR 注册、图片、扫描 PDF 和混合 PDF：
 
 ```powershell
-pwsh ./markitdown-desktop/test_release_ocr_desktop.ps1
+pwsh ./markitdown-desktop/test_release_ocr_desktop.ps1 -ReleaseDirectory ./markitdown-desktop/dist/MarkItDownDesk-fast-v1.2.3-windows-x64 -OcrSourceDirectory <offline-ocr分支检出目录> -OcrArchive <ocr-engine.zip路径>
 ```
 
 脚本会自动使用归档旁的 `ocr-engine-manifest.json`（若存在）执行签名、哈希和正式下载地址校验。
+
+引擎源码及其单元测试维护在 `offline-ocr` 分支；主分支不再重复保存。OCR 源码目录需要已运行该分支的 `build.ps1`，以提供验签和测试夹具所需的 Python 环境。

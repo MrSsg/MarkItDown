@@ -118,16 +118,16 @@ pwsh .\markitdown-desktop\package_release.ps1 -Clean
 pwsh .\markitdown-desktop\test_release.ps1
 ~~~
 
-### 构建 OCR 组件
+### 独立 OCR 分支
 
-OCR 组件必须在安全的发布环境中构建。签名私钥通过环境变量 <code>MARKITDOWN_OCR_SIGNING_KEY</code> 注入，不能写入仓库、日志或桌面包：
+仓库只维护两个分支：
 
-~~~powershell
-$env:MARKITDOWN_OCR_SIGNING_KEY = "<仅在安全发布环境设置>"
-pwsh .\markitdown-desktop\ocr-engine\build.ps1
-~~~
+- `main`：转换内核、桌面程序、OCR 安装与接入，以及桌面发行包。
+- [`offline-ocr`](https://github.com/MrSsg/MarkItDown/tree/offline-ocr)：独立 OCR 引擎源码、模型打包、签名、测试与发布。
 
-组件构建、签名清单、健康检查和发布流程见 [ocr-engine/README.md](./markitdown-desktop/ocr-engine/README.md)。GitHub Actions 工作流位于 [.github/workflows/desktop.yml](./.github/workflows/desktop.yml)。
+OCR 的构建和签名说明见该分支 README。桌面用户直接安装已发布的 OCR 包，无需切换分支。两条分支独立发布，不要将整个 OCR 分支合并回主分支。
+
+本地只保留当前桌面版本的发行目录、ZIP 和元数据；历史版本从 GitHub Releases 获取。
 
 ## 测试
 
@@ -144,7 +144,7 @@ $env:PYTHONPATH = "$PWD\markitdown-desktop;$PWD\packages\markitdown\src"
 pwsh .\markitdown-desktop\test_release.ps1 -ReleaseDirectory ".\markitdown-desktop\dist\MarkItDownDesk-fast-v1.2.3-windows-x64"
 ~~~
 
-CI 会在 Windows Python 3.12 环境中执行桌面单元测试、真实 EXE 四格式转换和 OCR 集成冒烟测试。
+主分支 CI 执行桌面单元测试和真实 EXE 四格式转换；OCR 分支的发布工作流执行引擎与桌面集成验收。
 
 ## 项目结构
 
@@ -152,9 +152,8 @@ CI 会在 Windows Python 3.12 环境中执行桌面单元测试、真实 EXE 四
 packages/markitdown/           微软 MarkItDown 转换内核（本项目基础）
 packages/markitdown-ocr/       独立的 LLM OCR 插件代码，不打包进桌面端
 markitdown-desktop/app/        PySide6 桌面界面、队列、历史和 OCR 客户端
-markitdown-desktop/ocr-engine/ 独立 PaddleOCR CPU 引擎及签名发布脚本
 markitdown-desktop/assets/     桌面图标和界面资源
-.github/workflows/             Windows 构建、回归测试和 OCR 发布流程
+.github/workflows/             Windows 桌面构建与回归测试
 ~~~
 
 ## 安全与隐私
