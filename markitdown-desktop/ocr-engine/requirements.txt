@@ -1,6 +1,0 @@
-paddlepaddle==3.3.0
-paddleocr==3.7.0
-PyMuPDF>=1.24,<2
-Pillow>=10,<12
-pyinstaller>=6.14,<7
-cryptography>=42

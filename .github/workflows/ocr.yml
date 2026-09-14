@@ -1,0 +1,78 @@
+name: offline-ocr
+on:
+  push:
+    branches: [offline-ocr]
+    tags: ['ocr-engine-*']
+  pull_request:
+    branches: [offline-ocr]
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: Build signed OCR package and run desktop integration
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  unit-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cryptography
+      - run: python -m unittest discover -s tests -v
+  release:
+    needs: unit-tests
+    if: startsWith(github.ref, 'refs/tags/ocr-engine-') || inputs.build_release == true
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: _desktop
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check shared verification keys
+        shell: pwsh
+        run: |
+          if ((Get-Content ./ocr_public_keys.json -Raw).Trim() -ne (Get-Content ./_desktop/markitdown-desktop/app/ocr_public_keys.json -Raw).Trim()) {
+            throw 'OCR and desktop public keys differ'
+          }
+      - name: Build signed engine
+        shell: pwsh
+        env:
+          MARKITDOWN_OCR_SIGNING_KEY: ${{ secrets.MARKITDOWN_OCR_SIGNING_KEY }}
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/ocr-engine-*') {
+            ./build.ps1 -ReleaseUrl "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/ocr-engine.zip"
+          } else {
+            ./build.ps1
+          }
+      - name: Verify engine archive
+        shell: pwsh
+        run: ./test_release_ocr.ps1
+      - name: Build desktop integration target
+        shell: pwsh
+        run: ./_desktop/markitdown-desktop/build_fast.ps1 -OutputRoot "$env:RUNNER_TEMP/desktop-ocr"
+      - name: Verify desktop OCR integration
+        shell: pwsh
+        run: |
+          $build = Get-ChildItem "$env:RUNNER_TEMP/desktop-ocr" -Directory -Filter 'py312-*' | Select-Object -First 1
+          ./_desktop/markitdown-desktop/test_release_ocr_desktop.ps1 -ReleaseDirectory (Join-Path $build.FullName 'MarkItDownDesk-fast') -OcrArchive "$PWD/dist/ocr-engine.zip" -OcrManifest "$PWD/dist/ocr-engine-manifest.json" -OcrSourceDirectory "$PWD"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocr-engine
+          path: dist/
+      - name: Publish OCR assets
+        if: startsWith(github.ref, 'refs/tags/ocr-engine-')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ocr-engine.zip
+            dist/ocr-engine-manifest.json
